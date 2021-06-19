@@ -1,0 +1,12 @@
+[package]
+name = "bytecode"
+version = "0.1.0"
+authors = ["\\[\\033[1;36m\\]\\u <tr.menke@web.de>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+strum = "0.21"
+strum_macros = "0.21"
+peekmore = "1.0"
