@@ -1,7 +1,6 @@
 use crate::{
     assembler::Assembler,
-    chunk::{Chunk, OpCode},
-    compiler::Compiler,
+    chunk::{Chunk, CodeIndex, OpCode},
     value::Value,
 };
 
@@ -13,7 +12,7 @@ pub enum InterpretationResult {
 
 pub struct VM {
     chunk: Chunk,
-    ip: usize, // instruction pointer points at the instruction about to be executed at all times
+    ip: CodeIndex, // instruction pointer points at the instruction about to be executed at all times
     assembler: Assembler,
     stack: Vec<Value>,
 }
@@ -28,25 +27,10 @@ impl VM {
         }
     }
 
-    pub fn interpret(&mut self, source: String) -> InterpretationResult {
-        let mut compiler = Compiler::new();
+    pub fn interpret(&mut self, chunk: Chunk) -> InterpretationResult {
+        self.ip = 0;
+        self.chunk = chunk;
 
-        match compiler.compile(source) {
-            Ok(()) => todo!(),
-            Err(e) => {
-                println!("Compiler-error: {}", e);
-                return InterpretationResult::CompileError;
-            }
-        }
-
-        /* self.chunk = chunk;
-               self.ip = 0;
-
-               return self.run();
-        */
-    }
-
-    pub fn run(&mut self) -> InterpretationResult {
         loop {
             let instruction = self.chunk.get_op(self.ip);
             if instruction.is_none() {
@@ -54,12 +38,16 @@ impl VM {
             }
 
             if cfg!(debug_assertions) {
-                self.assembler.disassemble_instruction(&self.chunk, self.ip);
-                print!("          ");
-                for value in &self.stack {
-                    print!("[ {} ]", value);
+                if let Some(content) = self.chunk.content_at(self.ip) {
+                    self.assembler.disassemble_instruction(self.ip, content);
+                    print!("          ");
+
+                    for value in &self.stack {
+                        print!("[ {} ]", value);
+                    }
+
+                    println!("");
                 }
-                println!("");
             }
 
             self.ip += 1; // ip must always point to the next instruction while executing the last
@@ -71,8 +59,8 @@ impl VM {
                         print!("{}", stack_top);
                     }
                 }
-                OpCode::Constant(index) => {
-                    let constant = self.chunk.get_constant(index);
+                OpCode::Constant => {
+                    let constant = self.chunk.constant_at_code_index(self.ip + 1);
                     self.stack.push(constant.clone());
                 }
                 OpCode::Negate => {
