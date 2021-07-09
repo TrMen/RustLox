@@ -12,11 +12,18 @@ pub type CodeIndex = usize;
 pub enum OpCode {
     Return,
     Constant,
+    Nil, // Nil, True, False are optimizations for avoiding constant lookup in those cases
+    True,
+    False,
+    Equal,
+    Greater,
+    Less,
     Negate,
     Add,
     Subtract,
     Multiply,
     Divide,
+    Not,
 }
 
 impl OpCode {
@@ -25,6 +32,7 @@ impl OpCode {
     }
 }
 
+#[derive(Debug)]
 pub struct LineInformation {
     pub line: i32,
     pub count: usize,
@@ -33,12 +41,7 @@ pub struct LineInformation {
 pub struct Chunk {
     pub code: Vec<u8>,
     constants: Vec<Value>,
-    lines: Vec<LineInformation>,
-}
-
-pub enum ChunkContent {
-    Code(OpCode),
-    CodeIndex(u8),
+    pub lines: Vec<LineInformation>,
 }
 
 impl Chunk {
@@ -66,11 +69,14 @@ impl Chunk {
         self.code.push(high);
         self.code.push(low);
 
-        if self.lines.is_empty() || self.lines.last().unwrap().line != line {
-            self.lines.push(LineInformation { line, count: 0 });
-        }
+        // Once for low, once for high
+        for _ in 0..2 {
+            if self.lines.is_empty() || self.lines.last().unwrap().line != line {
+                self.lines.push(LineInformation { line, count: 0 });
+            }
 
-        self.lines.last_mut().unwrap().count += 1;
+            self.lines.last_mut().unwrap().count += 1;
+        }
     }
 
     pub fn get_line(&self, code_index: CodeIndex) -> Option<i32> {
@@ -103,28 +109,11 @@ impl Chunk {
         &self.constants[combined_index as CodeIndex]
     }
 
-    pub fn get_op(&self, index: CodeIndex) -> Option<OpCode> {
-        // Return the OpCode if there is one at this location.
-        // Otherwise, return None (no more code, or constant_index here)
-        OpCode::from_u8(*self.code.get(index)?)
-    }
-
-    pub fn iter(&self) -> Box<dyn Iterator<Item = ChunkContent> + '_> {
-        // Meant for easy iteration. Not maximally efficient.
-        Box::new(self.code.iter().map(|byte| match OpCode::from_u8(*byte) {
-            Some(op) => ChunkContent::Code(op),
-            None => ChunkContent::CodeIndex(*byte),
-        }))
-    }
-
-    pub fn content_at(&self, index: CodeIndex) -> Option<ChunkContent> {
-        // Meant for easy access. Not maximally efficient.
-        self.code
-            .get(index as usize)
-            .map(|byte| match OpCode::from_u8(*byte) {
-                Some(op) => ChunkContent::Code(op),
-                None => ChunkContent::CodeIndex(*byte),
-            })
+    pub fn instruction_at(&self, code_index: CodeIndex) -> Option<OpCode> {
+        Some(
+            OpCode::from_u8(*self.code.get(code_index)?)
+                .expect("Content cannot be interpreted as an instruction"),
+        )
     }
 }
 
@@ -153,6 +142,21 @@ mod tests {
     }
 
     #[test]
+    fn lines_for_constants() {
+        let mut chunk = Chunk::new();
+
+        for line in 0..10 {
+            chunk.append_constant_index(0, line);
+        }
+
+        for line in 0..10 {
+            // Low and high need to have the same line
+            assert_eq!(chunk.get_line(2 * line), Some(line as i32));
+            assert_eq!(chunk.get_line(2 * line + 1), Some(line as i32));
+        }
+    }
+
+    #[test]
     fn constants() {
         let mut chunk = Chunk::new();
 
@@ -168,21 +172,6 @@ mod tests {
     #[test]
     fn op_code_is_1_byte_big() {
         assert_eq!(std::mem::size_of::<OpCode>(), 1);
-    }
-
-    #[test]
-    fn opcode_to_primitive() {
-        assert_eq!(FromPrimitive::from_u8(0), Some(OpCode::Return));
-        assert_eq!(FromPrimitive::from_u8(1), Some(OpCode::Constant));
-        assert_eq!(FromPrimitive::from_u8(2), Some(OpCode::Negate));
-
-        assert_eq!(ToPrimitive::to_u8(&OpCode::Return), Some(0));
-        assert_eq!(ToPrimitive::to_u8(&OpCode::Constant), Some(1));
-        assert_eq!(ToPrimitive::to_u8(&OpCode::Negate), Some(2));
-
-        let out_of_range: Option<OpCode> = FromPrimitive::from_u8(150);
-
-        assert_eq!(out_of_range, None);
     }
 
     #[test]

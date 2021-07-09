@@ -1,19 +1,19 @@
+use std::ops::{Neg, Not};
+
 use crate::{
-    assembler::Assembler,
+    assembler,
     chunk::{Chunk, CodeIndex, OpCode},
     value::Value,
 };
 
-pub enum InterpretationResult {
-    OK,
-    CompileError,
-    RuntimeError,
+#[derive(Debug, PartialEq)]
+pub struct RuntimeError {
+    pub msg: String,
 }
 
 pub struct VM {
     chunk: Chunk,
     ip: CodeIndex, // instruction pointer points at the instruction about to be executed at all times
-    assembler: Assembler,
     stack: Vec<Value>,
 }
 
@@ -22,66 +22,152 @@ impl VM {
         VM {
             chunk: Chunk::new(),
             ip: 0,
-            assembler: Assembler::new(),
             stack: Vec::with_capacity(512),
         }
     }
 
-    pub fn interpret(&mut self, chunk: Chunk) -> InterpretationResult {
+    pub fn interpret(&mut self, chunk: Chunk) -> Result<(), RuntimeError> {
         self.ip = 0;
         self.chunk = chunk;
 
         loop {
-            let instruction = self.chunk.get_op(self.ip);
+            let instruction = self.chunk.instruction_at(self.ip);
+
             if instruction.is_none() {
-                return InterpretationResult::OK; // Done interpreting
+                return Ok(()); // Done interpreting
             }
 
             if cfg!(debug_assertions) {
-                if let Some(content) = self.chunk.content_at(self.ip) {
-                    self.assembler.disassemble_instruction(self.ip, content);
-                    print!("          ");
+                assembler::disassemble_instruction(&self.chunk, self.ip, instruction.unwrap());
+                print!("          ");
 
-                    for value in &self.stack {
-                        print!("[ {} ]", value);
-                    }
-
-                    println!("");
+                for value in &self.stack {
+                    print!("[ {} ]", value);
                 }
+
+                println!("");
             }
 
             self.ip += 1; // ip must always point to the next instruction while executing the last
 
-            // Decode instruction
-            match instruction.unwrap() {
-                OpCode::Return => {
-                    if let Some(stack_top) = self.stack.pop() {
-                        print!("{}", stack_top);
-                    }
-                }
-                OpCode::Constant => {
-                    let constant = self.chunk.constant_at_code_index(self.ip + 1);
-                    self.stack.push(constant.clone());
-                }
-                OpCode::Negate => {
-                    let val = self.stack.last_mut().expect("Stack empty");
-                    *val = -val.clone();
-                }
-                OpCode::Add => self.binary_op(std::ops::Add::add),
-                OpCode::Subtract => self.binary_op(std::ops::Sub::sub),
-                OpCode::Multiply => self.binary_op(std::ops::Mul::mul),
-                OpCode::Divide => self.binary_op(std::ops::Div::div),
+            if let Err(err) = self.execute_instruction(instruction.unwrap()) {
+                self.runtime_error(&err.msg);
+                return Err(err);
             }
         }
     }
 
-    pub fn binary_op(&mut self, op: impl FnOnce(Value, Value) -> Value) {
+    fn execute_instruction(&mut self, instruction: OpCode) -> Result<(), RuntimeError> {
+        // Decode instruction
+        match instruction {
+            OpCode::Return => {
+                if let Some(stack_top) = self.stack.pop() {
+                    print!("{}", stack_top);
+                }
+            }
+            OpCode::Constant => {
+                // Note: ip already incremented, so ip is start of constant index
+                let constant = self.chunk.constant_at_code_index(self.ip);
+                self.stack.push(constant.clone());
+                self.ip += 2; // Skip low and high of constant index
+            }
+            OpCode::Negate => self.unary_op(std::ops::Neg::neg)?,
+            OpCode::Not => self.unary_op(std::ops::Not::not)?,
+            OpCode::Add => self.binary_op(std::ops::Add::add)?,
+            OpCode::Subtract => self.binary_op(std::ops::Sub::sub)?,
+            OpCode::Multiply => self.binary_op(std::ops::Mul::mul)?,
+            OpCode::Divide => self.binary_op(std::ops::Div::div)?,
+            OpCode::Greater => self.binary_op(Value::gt)?,
+            OpCode::Less => self.binary_op(Value::lt)?,
+            OpCode::True => self.stack.push(Value::Bool(true)),
+            OpCode::False => self.stack.push(Value::Bool(false)),
+            OpCode::Nil => self.stack.push(Value::Nil),
+            OpCode::Equal => {
+                let rhs = self.pop(); // This order is intended
+                let lhs = self.pop(); // If lhs is evaluated first, it will be below rhs on a stack
+
+                self.stack.push(Value::Bool(lhs == rhs));
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn unary_op(
+        &mut self,
+        op: impl FnOnce(Value) -> Result<Value, &'static str>,
+    ) -> Result<(), RuntimeError> {
+        let val = self.stack.last_mut().expect("Stack empty");
+
+        println!("Unary op on '{}'", &val);
+
+        *val = match op(val.clone()) {
+            Err(msg) => {
+                return Err(RuntimeError {
+                    msg: String::from(msg),
+                });
+            }
+            Ok(val) => val,
+        };
+
+        println!("Unary op left '{:?}' on the stack", self.stack.last());
+
+        Ok(())
+    }
+
+    pub fn runtime_error(&mut self, msg: &str) {
+        println!(
+            "{}\n [line {}] in script",
+            msg,
+            self.chunk
+                .get_line(self.ip - 1) // Last op, because ip always points at the op about to execute
+                .expect("No line saved for current instruction"),
+        );
+
+        self.stack.clear();
+    }
+
+    /// Unlike binary_op(), this always returns a value for all inputs
+    pub fn binary_op_returning_bool(&mut self, op: impl FnOnce(&Value, &Value) -> bool) {}
+
+    pub fn binary_op(
+        &mut self,
+        op: impl FnOnce(Value, Value) -> Result<Value, &'static str>,
+    ) -> Result<(), RuntimeError> {
         let rhs = self.pop(); // This order is intended
         let lhs = self.pop(); // If lhs is evaluated first, it will be below rhs on a stack
-        self.stack.push(op(lhs, rhs));
+
+        let val = match op(lhs, rhs) {
+            Err(msg) => {
+                return Err(RuntimeError {
+                    msg: String::from(msg),
+                });
+            }
+            Ok(val) => val,
+        };
+
+        self.stack.push(val);
+
+        Ok(())
     }
 
     pub fn pop(&mut self) -> Value {
         self.stack.pop().expect("Stack empty")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::compiler::Compiler;
+
+    use super::*;
+
+    #[test]
+    fn constant() {
+        let mut vm = VM::new();
+
+        let chunk = Compiler::compile("1").unwrap();
+
+        assert_eq!(vm.interpret(chunk), Ok(()));
     }
 }
