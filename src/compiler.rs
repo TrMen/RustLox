@@ -54,9 +54,9 @@ fn init_rules<'a>() -> [ParseRule<'a>; TokenKind::VARIANT_COUNT] {
         rule(None, Some(Compiler::binary), Prec::new(Precedence::Comp)),  // >=
         rule(None, Some(Compiler::binary), Prec::new(Precedence::Comp)),  // <
         rule(None, Some(Compiler::binary), Prec::new(Precedence::Comp)),  // <=
-        rule(None, None, Prec::new(Precedence::None)),
-        rule(None, None, Prec::new(Precedence::None)),
-        rule(Some(Compiler::number), None, Prec::new(Precedence::None)),
+        rule(None, None, Prec::new(Precedence::None)),                    // Identifier
+        rule(Some(Compiler::string), None, Prec::new(Precedence::None)),  // String
+        rule(Some(Compiler::number), None, Prec::new(Precedence::None)),  // Number
         rule(None, None, Prec::new(Precedence::None)),
         rule(None, None, Prec::new(Precedence::None)),
         rule(None, None, Prec::new(Precedence::None)),
@@ -83,19 +83,19 @@ pub struct CompiletimeError {
     pub msg: String,
 }
 
-pub struct Compiler<'a> {
-    rules: [ParseRule<'a>; TokenKind::VARIANT_COUNT],
-    scanner: Scanner<'a>,
-    parser: Parser,
+pub struct Compiler<'src> {
+    rules: [ParseRule<'src>; TokenKind::VARIANT_COUNT],
+    scanner: Scanner<'src>,
+    parser: Parser<'src>,
     chunk: Chunk,
 }
 
-impl<'a> Compiler<'a> {
-    pub fn compile(source: &'a str) -> Result<Chunk, CompiletimeError> {
+impl<'src> Compiler<'src> {
+    pub fn compile(source: &'src str) -> Result<Chunk, CompiletimeError> {
         let mut compiler = Compiler {
             rules: init_rules(),
             scanner: Scanner::new(source),
-            parser: Parser::new(),
+            parser: Parser::new(source),
             chunk: Chunk::new(),
         };
 
@@ -128,8 +128,8 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    /// Sets the next token as parser's current token, and returns a reference to it
     fn next_token_for_parser(&mut self) -> &Token {
-        // Sets the next token as parser's current token, and returns a reference to it
         let token = self.scanner.scan_token();
 
         #[cfg(debug_assertions)]
@@ -200,7 +200,7 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn get_rule(&self, kind: TokenKind) -> ParseRule<'a> {
+    fn get_rule(&self, kind: TokenKind) -> ParseRule<'src> {
         self.rules[kind as usize].clone()
     }
 
@@ -232,6 +232,10 @@ impl<'a> Compiler<'a> {
             TokenKind::Nil => self.emit_op(OpCode::Nil),
             _ => (),
         }
+    }
+
+    fn string(&mut self) {
+        self.emit_constant(Value::Object(self.parser.previous.lexeme.to_string()));
     }
 
     fn number(&mut self) {

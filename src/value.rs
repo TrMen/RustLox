@@ -1,5 +1,4 @@
 use std::{
-    cmp,
     fmt::Display,
     ops::{Add, Div, Mul, Neg, Not, Sub},
 };
@@ -9,6 +8,7 @@ pub enum Value {
     Double(f32),
     Bool(bool),
     Nil,
+    Object(String),
 }
 
 type ValueResult = Result<Value, &'static str>;
@@ -45,6 +45,7 @@ impl Display for Value {
             Value::Double(val) => write!(f, "{}", val),
             Value::Bool(val) => write!(f, "{}", val),
             Value::Nil => write!(f, "nil"),
+            Value::Object(obj) => write!(f, "Object {:?}", obj),
         }
     }
 }

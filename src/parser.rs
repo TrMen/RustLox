@@ -3,18 +3,18 @@ use crate::{
     scanner::{Token, TokenKind},
 };
 
-pub struct Parser {
-    pub current: Token,
-    pub previous: Token,
+pub struct Parser<'src> {
+    pub current: Token<'src>,
+    pub previous: Token<'src>,
     pub had_error: bool,
     pub panic_mode: bool, // Set on error until next synchronization-point (statement). Supresses further error reports
 }
 
-impl Parser {
-    pub fn new() -> Parser {
+impl<'src> Parser<'src> {
+    pub fn new(source: &'src str) -> Parser<'src> {
         let token = Token {
             kind: TokenKind::Error,
-            lexeme: String::new(),
+            lexeme: &source[..0],
             line: 0,
         };
 

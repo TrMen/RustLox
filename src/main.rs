@@ -6,6 +6,7 @@ mod parser;
 mod scanner;
 mod value;
 mod vm;
+mod object;
 
 #[macro_use]
 extern crate num_derive;
