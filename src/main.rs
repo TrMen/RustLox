@@ -1,12 +1,12 @@
 mod assembler;
 mod chunk;
 mod compiler;
-mod precedence;
+mod object;
 mod parser;
+mod precedence;
 mod scanner;
 mod value;
 mod vm;
-mod object;
 
 #[macro_use]
 extern crate num_derive;
