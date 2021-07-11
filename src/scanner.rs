@@ -81,12 +81,12 @@ impl<'src> SourceSpan<'src> {
     }
 
     pub fn peek(&mut self) -> Option<char> {
-        self.chars.peek().map(|c| *c) // TODO: Check off-by-one
+        self.chars.peek().map(|c| *c)
     }
 
     pub fn advance(&mut self) -> Option<char> {
         if !self.is_at_end() {
-            self.current += 1; // TODO: Check off-by-one
+            self.current += 1;
         }
         let c = self.chars.peek().map(|c| *c);
         self.chars.next();
@@ -95,7 +95,7 @@ impl<'src> SourceSpan<'src> {
     }
 
     pub fn peek_nth(&mut self, n: usize) -> Option<char> {
-        self.chars.peek_nth(n).map(|c| *c) // TODO: Check off-by-one
+        self.chars.peek_nth(n).map(|c| *c)
     }
 
     pub fn lexeme(&self) -> &'src str {

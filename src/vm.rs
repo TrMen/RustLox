@@ -1,9 +1,14 @@
-use std::ops::{Neg, Not};
+use std::{
+    collections::HashSet,
+    ops::{Neg, Not},
+    rc::Rc,
+};
 
 use crate::{
     assembler,
     chunk::{Chunk, CodeIndex, OpCode},
-    value::Value,
+    object::{Object, ObjectList},
+    value::{print_vec_val, Value},
 };
 
 #[derive(Debug, PartialEq)]
@@ -15,14 +20,18 @@ pub struct VM {
     chunk: Chunk,
     ip: CodeIndex, // instruction pointer points at the instruction about to be executed at all times
     stack: Vec<Value>,
+    objects: ObjectList,
+    strings: HashSet<String>,
 }
 
 impl VM {
-    pub fn new() -> VM {
+    pub fn new(objects: ObjectList) -> VM {
         VM {
             chunk: Chunk::new(),
             ip: 0,
             stack: Vec::with_capacity(512),
+            objects,
+            strings: HashSet::new(),
         }
     }
 
@@ -34,6 +43,9 @@ impl VM {
             let instruction = self.chunk.instruction_at(self.ip);
 
             if instruction.is_none() {
+                println!("\nObjects at end: {}", self.objects);
+                print_vec_val(&self.stack);
+                print_vec_val(&self.chunk.constants);
                 return Ok(()); // Done interpreting
             }
 
@@ -86,14 +98,23 @@ impl VM {
                 let rhs = self.pop(); // This order is intended
                 let lhs = self.pop(); // If lhs is evaluated first, it will be below rhs on a stack
 
-                self.stack.push(Value::Bool(lhs == rhs));
+                /*let compared = if lhs.is_string() && rhs.is_string() { TODO: Add string-deduplication
+                    self.compare_strings(&lhs, &rhs)
+                }
+                else {
+                    Value::Bool(lhs == rhs)
+                }*/
+
+                let compared = Value::Bool(lhs == rhs);
+
+                self.stack.push(compared);
             }
         }
 
         Ok(())
     }
 
-    pub fn unary_op(
+    fn unary_op(
         &mut self,
         op: impl FnOnce(Value) -> Result<Value, &'static str>,
     ) -> Result<(), RuntimeError> {
@@ -127,9 +148,6 @@ impl VM {
         self.stack.clear();
     }
 
-    /// Unlike binary_op(), this always returns a value for all inputs
-    pub fn binary_op_returning_bool(&mut self, op: impl FnOnce(&Value, &Value) -> bool) {}
-
     pub fn binary_op(
         &mut self,
         op: impl FnOnce(Value, Value) -> Result<Value, &'static str>,
@@ -143,7 +161,13 @@ impl VM {
                     msg: String::from(msg),
                 });
             }
-            Ok(val) => val,
+            Ok(val) => {
+                if let Value::Obj(obj) = &val {
+                    self.objects.add_existing_object(obj.clone());
+                }
+
+                val
+            }
         };
 
         self.stack.push(val);
@@ -164,9 +188,9 @@ mod tests {
 
     #[test]
     fn constant() {
-        let mut vm = VM::new();
+        let mut vm = VM::new(ObjectList::new());
 
-        let chunk = Compiler::compile("1").unwrap();
+        let (chunk, _) = Compiler::compile("1").unwrap();
 
         assert_eq!(vm.interpret(chunk), Ok(()));
     }

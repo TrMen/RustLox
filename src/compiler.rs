@@ -1,5 +1,6 @@
 use crate::{
     chunk::{Chunk, OpCode},
+    object::{Object, ObjectList},
     parser::Parser,
     precedence::{Prec, Precedence},
     scanner::{Scanner, Token, TokenKind},
@@ -88,15 +89,17 @@ pub struct Compiler<'src> {
     scanner: Scanner<'src>,
     parser: Parser<'src>,
     chunk: Chunk,
+    objects: ObjectList,
 }
 
 impl<'src> Compiler<'src> {
-    pub fn compile(source: &'src str) -> Result<Chunk, CompiletimeError> {
+    pub fn compile(source: &'src str) -> Result<(Chunk, ObjectList), CompiletimeError> {
         let mut compiler = Compiler {
             rules: init_rules(),
             scanner: Scanner::new(source),
             parser: Parser::new(source),
             chunk: Chunk::new(),
+            objects: ObjectList::new(),
         };
 
         compiler.advance();
@@ -108,7 +111,7 @@ impl<'src> Compiler<'src> {
         compiler.end_compilation()
     }
 
-    fn end_compilation(mut self) -> Result<Chunk, CompiletimeError> {
+    fn end_compilation(mut self) -> Result<(Chunk, ObjectList), CompiletimeError> {
         self.emit_op(OpCode::Return);
 
         if self.parser.had_error {
@@ -116,7 +119,7 @@ impl<'src> Compiler<'src> {
                 msg: String::from("Compilaton failed!"),
             })
         } else {
-            Ok(self.chunk)
+            Ok((self.chunk, self.objects))
         }
     }
 
@@ -235,7 +238,16 @@ impl<'src> Compiler<'src> {
     }
 
     fn string(&mut self) {
-        self.emit_constant(Value::Object(self.parser.previous.lexeme.to_string()));
+        // This can be omitted. Instead of having constants in the object list, they could just be
+        // saved in the constant array. That way, we guarantee that they aren't mutated, and save some
+        // heap allocations.
+        let string_object = self
+            .objects
+            .add_from_string(self.parser.previous.lexeme.to_string());
+
+        // It's fine to directly insert constants into the chunk, without usign an ObjectList,
+        // because constants do not get freed at runtime. Only after the end of the program.
+        self.emit_constant(Value::Obj(string_object));
     }
 
     fn number(&mut self) {
@@ -358,7 +370,7 @@ mod tests {
 
     #[test]
     fn compile_number() {
-        let chunk = Compiler::compile("1").expect("Compilation failed");
+        let (chunk, _) = Compiler::compile("1").expect("Compilation failed");
 
         assert_eq!(OpCode::from_u8(chunk.code[0]).unwrap(), OpCode::Constant);
         assert_eq!(chunk.constant_at_code_index(1), &Value::Double(1.0));
@@ -366,7 +378,7 @@ mod tests {
 
     #[test]
     fn compile_add() {
-        let chunk = Compiler::compile("1+2").expect("Compilation failed");
+        let (chunk, _) = Compiler::compile("1+2").expect("Compilation failed");
 
         assert_eq!(OpCode::from_u8(chunk.code[0]).unwrap(), OpCode::Constant);
         assert_eq!(chunk.constant_at_code_index(1), &Value::Double(1.0));

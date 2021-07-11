@@ -30,7 +30,7 @@ fn interpret(source: String) -> Result<(), InterpretationError> {
             println!("Compiler-error: {}", &e.msg);
             Err(InterpretationError::Compiletime)
         }
-        Ok(chunk) => {
+        Ok((chunk, object_list)) => {
             #[cfg(debug_assertions)]
             assembler::disassemble(&chunk, "code");
 
@@ -40,7 +40,7 @@ fn interpret(source: String) -> Result<(), InterpretationError> {
                 "ip", "line", "Instruction", "constant"
             );
 
-            let mut vm = VM::new();
+            let mut vm = VM::new(object_list);
 
             vm.interpret(chunk)
                 .map_err(|_| InterpretationError::Runtime)
