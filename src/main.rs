@@ -35,10 +35,7 @@ fn interpret(source: String) -> Result<(), InterpretationError> {
             assembler::disassemble(&chunk, "code");
 
             println!("\nStart of interpretation\n");
-            println!(
-                "{:04} {:4} {:-16} {}",
-                "ip", "line", "Instruction", "constant"
-            );
+            println!("{:04} {:4} {:-16} constant", "ip", "line", "Instruction");
 
             let mut vm = VM::new(object_list);
 

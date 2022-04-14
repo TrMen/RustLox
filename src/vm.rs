@@ -57,7 +57,7 @@ impl VM {
                     print!("[ {} ]", value);
                 }
 
-                println!("");
+                println!();
             }
 
             self.ip += 1; // ip must always point to the next instruction while executing the last

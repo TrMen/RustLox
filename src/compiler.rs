@@ -1,6 +1,6 @@
 use crate::{
     chunk::{Chunk, OpCode},
-    object::{Object, ObjectList},
+    object::ObjectList,
     parser::Parser,
     precedence::{Prec, Precedence},
     scanner::{Scanner, Token, TokenKind},
@@ -106,7 +106,7 @@ impl<'src> Compiler<'src> {
 
         compiler.expression();
 
-        compiler.consume(TokenKind::EOF, "Expect end of expression");
+        compiler.consume(TokenKind::Eof, "Expect end of expression");
 
         compiler.end_compilation()
     }
@@ -306,7 +306,7 @@ impl<'src> Compiler<'src> {
             TokenKind::LessEqual => self.emit_ops(OpCode::Greater, OpCode::Not),
             TokenKind::EqualEqual => self.emit_op(OpCode::Equal),
             TokenKind::BangEqual => self.emit_ops(OpCode::Equal, OpCode::Not),
-            invalid @ _ => panic!("Invalid operator type in binary expression: {}", invalid),
+            invalid => panic!("Invalid operator type in binary expression: {}", invalid),
         }
     }
 }

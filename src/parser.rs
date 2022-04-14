@@ -1,7 +1,4 @@
-use crate::{
-    chunk::{Chunk, OpCode},
-    scanner::{Token, TokenKind},
-};
+use crate::scanner::{Token, TokenKind};
 
 pub struct Parser<'src> {
     pub current: Token<'src>,
@@ -52,13 +49,13 @@ impl<'src> Parser<'src> {
         print!("[line {}] Error", token.line);
 
         match token.kind {
-            TokenKind::EOF => print!(" at end"),
+            TokenKind::Eof => print!(" at end"),
             TokenKind::Error => (),
             _ => print!(" at '{}'", token.lexeme),
         }
 
         if msg.is_empty() {
-            println!("");
+            println!();
         } else {
             println!(": '{}'", msg);
         }

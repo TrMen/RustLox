@@ -1,4 +1,4 @@
-use std::{collections::HashSet, fmt::Display, hash::Hash, rc::Rc};
+use std::{collections::HashSet, fmt::Display, rc::Rc};
 
 pub trait LoxObject {
     // Common information for garbage collection
