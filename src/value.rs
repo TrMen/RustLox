@@ -34,7 +34,7 @@ impl Value {
             Value::Double(val) => val.to_string(),
             Value::Bool(val) => val.to_string(),
             Value::Obj(val) => match &**val {
-                Object::String(str) => objects.strings.get_by_index(str.index).to_owned(),
+                Object::String(str) => objects.get_string_by_index(str.index).to_owned(),
             },
         }
     }
@@ -62,8 +62,8 @@ impl Value {
             Ok(Value::Double(lhs + rhs))
         } else if let (Value::Obj(lhs), Value::Obj(rhs)) = (self, rhs) {
             if let (Object::String(lhs), Object::String(rhs)) = (lhs.as_ref(), rhs.as_ref()) {
-                let concatenated = objects.strings.get_by_index(lhs.index).to_owned()
-                    + objects.strings.get_by_index(rhs.index);
+                let concatenated = objects.get_string_by_index(lhs.index).to_owned()
+                    + objects.get_string_by_index(rhs.index);
 
                 let obj_string = objects.add_string(concatenated);
 

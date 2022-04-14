@@ -30,7 +30,7 @@ pub enum Object {
 pub struct ObjectList {
     objects: Vec<Rc<Object>>,
 
-    pub strings: IndexableStringSet,
+    strings: IndexableStringSet,
 }
 
 impl ObjectList {
@@ -41,9 +41,11 @@ impl ObjectList {
         }
     }
 
+    pub fn get_string_by_index(&self, index: usize) -> &String {
+        self.strings.get_by_index(index)
+    }
+
     pub fn add_string(&mut self, string: String) -> Rc<Object> {
-        // TODO: Theoretically slightly unneeded to recompute hash here
-        // since we could've just stored string and hash in the interned list
         let index = self.strings.get_or_insert(string);
 
         let string_object = Rc::new(Object::String(ObjString { index }));
