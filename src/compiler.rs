@@ -1,9 +1,10 @@
 use crate::{
-    chunk::{Chunk, OpCode},
-    object::ObjectList,
+    chunk::{Chunk, ConstantIndex, OpCode},
+    indexable_string_set::IndexableStringSet,
+    object::{Object, ObjectList},
     parser::Parser,
     precedence::{Prec, Precedence},
-    scanner::{Scanner, Token, TokenKind},
+    scanner::TokenKind,
     value::Value,
 };
 
@@ -55,7 +56,7 @@ fn init_rules<'a>() -> [ParseRule<'a>; TokenKind::VARIANT_COUNT] {
         rule(None, Some(Compiler::binary), Prec::new(Precedence::Comp)),  // >=
         rule(None, Some(Compiler::binary), Prec::new(Precedence::Comp)),  // <
         rule(None, Some(Compiler::binary), Prec::new(Precedence::Comp)),  // <=
-        rule(None, None, Prec::new(Precedence::None)),                    // Identifier
+        rule(Some(Compiler::variable), None, Prec::new(Precedence::None)), // Identifier
         rule(Some(Compiler::string), None, Prec::new(Precedence::None)),  // String
         rule(Some(Compiler::number), None, Prec::new(Precedence::None)),  // Number
         rule(None, None, Prec::new(Precedence::None)),
@@ -86,32 +87,36 @@ pub struct CompiletimeError {
 
 pub struct Compiler<'src> {
     rules: [ParseRule<'src>; TokenKind::VARIANT_COUNT],
-    scanner: Scanner<'src>,
     parser: Parser<'src>,
     chunk: Chunk,
     objects: ObjectList,
+    strings: IndexableStringSet,
 }
 
 impl<'src> Compiler<'src> {
-    pub fn compile(source: &str) -> Result<(Chunk, ObjectList), CompiletimeError> {
+    pub fn compile(
+        source: &str,
+    ) -> Result<(Chunk, ObjectList, IndexableStringSet), CompiletimeError> {
         let mut compiler = Compiler {
             rules: init_rules(),
-            scanner: Scanner::new(source),
             parser: Parser::new(source),
             chunk: Chunk::new(),
             objects: ObjectList::new(),
+            strings: IndexableStringSet::new(),
         };
 
-        compiler.advance();
+        compiler.parser.advance();
 
-        compiler.expression();
-
-        compiler.consume(TokenKind::Eof, "Expect end of expression");
+        while !compiler.parser.match_advance(TokenKind::Eof) {
+            compiler.declaration();
+        }
 
         compiler.end_compilation()
     }
 
-    fn end_compilation(mut self) -> Result<(Chunk, ObjectList), CompiletimeError> {
+    fn end_compilation(
+        mut self,
+    ) -> Result<(Chunk, ObjectList, IndexableStringSet), CompiletimeError> {
         self.emit_op(OpCode::Return);
 
         if self.parser.had_error {
@@ -119,42 +124,13 @@ impl<'src> Compiler<'src> {
                 msg: String::from("Compilaton failed!"),
             })
         } else {
-            Ok((self.chunk, self.objects))
-        }
-    }
-
-    fn consume(&mut self, kind: TokenKind, err_message: &str) {
-        if self.parser.current.kind == kind {
-            self.advance();
-        } else {
-            self.parser.error_at_current(err_message);
-        }
-    }
-
-    /// Sets the next token as parser's current token, and returns a reference to it
-    fn next_token_for_parser(&mut self) -> &Token {
-        let token = self.scanner.scan_token();
-
-        #[cfg(debug_assertions)]
-        println!("   | {:7} '{}'", token.kind, token.lexeme);
-
-        self.parser.current = token;
-
-        &self.parser.current
-    }
-
-    fn advance(&mut self) {
-        // Skip and report all error-tokens. Leaves the first non-error as parser's current
-        self.parser.previous = self.parser.current.clone();
-
-        while let TokenKind::Error = self.next_token_for_parser().kind {
-            self.parser.error_at_current("");
+            Ok((self.chunk, self.objects, self.strings))
         }
     }
 
     fn emit_op(&mut self, op: OpCode) {
         let line = self.parser.previous.line;
-        self.current_chunk().append_op(op, line);
+        self.chunk.append_op(op, line);
     }
 
     fn emit_ops(&mut self, first: OpCode, second: OpCode) {
@@ -162,18 +138,32 @@ impl<'src> Compiler<'src> {
         self.emit_op(second);
     }
 
-    fn current_chunk(&mut self) -> &mut Chunk {
-        &mut self.chunk
+    fn emit_constant_index(&mut self, constant_index: ConstantIndex) {
+        let line = self.parser.previous.line;
+
+        self.chunk.append_constant_index(constant_index, line);
     }
 
-    // --------------------------------Parsing methods--------------------------------
+    fn emit_constant(&mut self, value: Value) {
+        self.emit_op(OpCode::Constant);
+
+        let constant_index = match self.chunk.add_constant(value) {
+            Ok(constant_index) => constant_index,
+            Err(err_message) => {
+                self.parser.error_at_previous(err_message);
+                u16::MAX // Not sure this is a good idea, but should be fine since I reported error
+            }
+        };
+
+        self.emit_constant_index(constant_index)
+    }
 
     fn parse_precedence(&mut self, prec: Prec) {
         // At this point, our previus token is some kind of operator (in a general sense).
         // E.g. '-', '+', '('. For this, there could be defined prefix and/or infix functions
 
         // Skip error tokens -> rhs operand is current token -> operand is previous token
-        self.advance();
+        self.parser.advance();
 
         let prefix_rule = self.get_rule(self.parser.previous.kind).prefix;
 
@@ -190,7 +180,7 @@ impl<'src> Compiler<'src> {
         // Then compile all following tokens which can be an infix rule (e.g. the already-compiled)
         // operand can be an argument for it. Compile only those of higher precedence.
         while prec.less(&self.get_rule(self.parser.current.kind).prec) {
-            self.advance();
+            self.parser.advance();
 
             // An infix rule must always exist, because only tokens with infix rules have a precedence
             // higher than None. So we can only get here if an infix exists
@@ -207,21 +197,85 @@ impl<'src> Compiler<'src> {
         self.rules[kind as usize].clone()
     }
 
-    fn emit_constant(&mut self, value: Value) {
-        self.emit_op(OpCode::Constant);
-
-        let constant_index = match self.current_chunk().add_constant(value) {
+    // TODO: This belongs in chunks
+    fn add_identifier_constant(&mut self, name: String) -> ConstantIndex {
+        match self
+            .chunk
+            .add_constant(Value::Obj(Object::from_string(name, &mut self.strings)))
+        {
             Ok(constant_index) => constant_index,
-            Err(err_message) => {
-                self.parser.error_at_previous(err_message);
-                u16::MAX // Not sure this is a good idea, but should be fine since I reported error
+            Err(msg) => {
+                self.parser.error_at_current(msg);
+                ConstantIndex::MAX
             }
-        };
+        }
+    }
 
-        let line = self.parser.previous.line;
+    fn define_variable(&mut self, global: ConstantIndex) {
+        // Essentially, this is emit_constant, but with a different opcode
+        self.emit_op(OpCode::DefineGlobal);
 
-        self.current_chunk()
-            .append_constant_index(constant_index, line);
+        self.emit_constant_index(global);
+    }
+
+    // --------------------------------Parsing methods--------------------------------
+
+    // Returns the index in the constant table that holds the variable name
+    fn parse_variable(&mut self, err_msg: &str) -> ConstantIndex {
+        self.parser.consume(TokenKind::Identifier, err_msg);
+
+        self.add_identifier_constant(self.parser.previous.lexeme.to_string())
+    }
+
+    fn declaration(&mut self) {
+        if self.parser.match_advance(TokenKind::Var) {
+            self.var_declaration();
+        } else {
+            self.statement();
+        }
+
+        if self.parser.panic_mode {
+            self.parser.synchronize();
+        }
+    }
+
+    fn var_declaration(&mut self) {
+        let global = self.parse_variable("Expect variable name.");
+
+        if self.parser.match_advance(TokenKind::Equal) {
+            self.expression();
+        } else {
+            self.emit_op(OpCode::Nil);
+        }
+
+        self.parser.consume(
+            TokenKind::Semicolon,
+            "Expect ';' after variable declaration.",
+        );
+
+        self.define_variable(global);
+    }
+
+    fn statement(&mut self) {
+        if self.parser.match_advance(TokenKind::Print) {
+            self.print_statement();
+        } else {
+            self.expression_statement();
+        }
+    }
+
+    fn expression_statement(&mut self) {
+        self.expression();
+        self.parser
+            .consume(TokenKind::Semicolon, "Expect ';' after expression.");
+        self.emit_op(OpCode::Pop);
+    }
+
+    fn print_statement(&mut self) {
+        self.expression();
+        self.parser
+            .consume(TokenKind::Semicolon, "Expect ';' after value.");
+        self.emit_op(OpCode::Print);
     }
 
     fn expression(&mut self) {
@@ -238,13 +292,12 @@ impl<'src> Compiler<'src> {
     }
 
     fn string(&mut self) {
-        let string_object = self
-            .objects
-            .add_string(self.parser.previous.lexeme.to_string());
+        let string_obj =
+            Object::from_string(self.parser.previous.lexeme.to_string(), &mut self.strings);
 
-        // It's fine to directly insert constants into the chunk, without using an ObjectList,
-        // because constants do not get freed at runtime. Only after the end of the program.
-        self.emit_constant(Value::Obj(string_object));
+        // Note: String deliberately not added to ObjectList because constants
+        // should not be tracked by gc
+        self.emit_constant(Value::Obj(string_obj));
     }
 
     fn number(&mut self) {
@@ -258,9 +311,21 @@ impl<'src> Compiler<'src> {
         self.emit_constant(Value::Double(*float));
     }
 
+    fn variable(&mut self) {
+        self.named_variable(self.parser.previous.lexeme.to_string());
+    }
+
+    fn named_variable(&mut self, name: String) {
+        // GetGlobal has a constant index as arg
+        let constant_index = self.add_identifier_constant(name);
+        self.emit_op(OpCode::GetGlobal);
+        self.emit_constant_index(constant_index);
+    }
+
     fn grouping(&mut self) {
         self.expression();
-        self.consume(TokenKind::RightParen, "Expect ')' after expression.");
+        self.parser
+            .consume(TokenKind::RightParen, "Expect ')' after expression.");
     }
 
     fn unary(&mut self) {
@@ -367,7 +432,7 @@ mod tests {
 
     #[test]
     fn compile_number() {
-        let (chunk, _) = Compiler::compile("1").expect("Compilation failed");
+        let (chunk, _, _) = Compiler::compile("1").expect("Compilation failed");
 
         assert_eq!(OpCode::from_u8(chunk.code[0]).unwrap(), OpCode::Constant);
         assert_eq!(chunk.constant_at_code_index(1), &Value::Double(1.0));
@@ -375,7 +440,7 @@ mod tests {
 
     #[test]
     fn compile_add() {
-        let (chunk, _) = Compiler::compile("1+2").expect("Compilation failed");
+        let (chunk, _, _) = Compiler::compile("1+2").expect("Compilation failed");
 
         assert_eq!(OpCode::from_u8(chunk.code[0]).unwrap(), OpCode::Constant);
         assert_eq!(chunk.constant_at_code_index(1), &Value::Double(1.0));

@@ -26,39 +26,27 @@ pub enum Object {
     String(ObjString),
 }
 
+impl Object {
+    pub fn from_string(string: String, interned_strings: &mut IndexableStringSet) -> Rc<Self> {
+        let index = interned_strings.get_or_insert(string);
+
+        Rc::new(Object::String(ObjString { index }))
+    }
+}
+
 #[derive(Debug)]
 pub struct ObjectList {
     objects: Vec<Rc<Object>>,
-
-    strings: IndexableStringSet,
 }
 
 impl ObjectList {
     pub fn new() -> ObjectList {
         ObjectList {
             objects: Vec::new(),
-            strings: IndexableStringSet::new(),
         }
     }
 
-    pub fn get_string_by_index(&self, index: usize) -> &String {
-        self.strings.get_by_index(index)
-    }
-
-    pub fn add_string(&mut self, string: String) -> Rc<Object> {
-        let index = self.strings.get_or_insert(string);
-
-        let string_object = Rc::new(Object::String(ObjString { index }));
-
-        // Note: Two different objects can have the same string, so 2 entries in obj list,
-        // but only one in string list
-        self.objects.push(string_object);
-
-        self.objects.last().unwrap().clone()
-    }
-
     pub fn add_existing_object(&mut self, object: Rc<Object>) {
-        // TODO: This prolly shouldn't exist. All objects should start by being created in the list
         self.objects.push(object);
     }
 }

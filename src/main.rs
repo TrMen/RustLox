@@ -35,14 +35,14 @@ fn interpret(source: String) -> Result<(), InterpretationError> {
             println!("Compiler-error: {}", &e.msg);
             Err(InterpretationError::Compiletime)
         }
-        Ok((chunk, object_list)) => {
+        Ok((chunk, object_list, strings)) => {
             #[cfg(debug_assertions)]
             assembler::disassemble(&chunk, "code");
 
             println!("\nStart of interpretation\n");
             println!("{:04} {:4} {:-16} constant", "ip", "line", "Instruction");
 
-            let mut vm = VM::new(object_list);
+            let mut vm = VM::new(object_list, strings);
 
             vm.interpret(chunk)
                 .map_err(|_| InterpretationError::Runtime)
