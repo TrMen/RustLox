@@ -1,13 +1,11 @@
 use std::{
-    collections::HashSet,
-    fmt::Display,
-    ops::{Add, Div, Mul, Neg, Not, Sub},
+    ops::{Div, Mul, Neg, Not, Sub},
     rc::Rc,
 };
 
-use crate::object::{ObjString, Object};
+use crate::object::{Object, ObjectList};
 
-#[derive(Debug, PartialEq, Clone)] // TODO: Remove clone for possible string-deduplication
+#[derive(Debug, Clone)] // TODO: Remove clone for possible string-deduplication
 pub enum Value {
     Double(f32),
     Bool(bool),
@@ -19,7 +17,7 @@ pub fn print_vec_val(values: &Vec<Value>) {
     print!("[");
 
     for val in values {
-        print!("{}, ", val);
+        print!("{:?}, ", val);
     }
 
     println!("]");
@@ -28,6 +26,19 @@ pub fn print_vec_val(values: &Vec<Value>) {
 type ValueResult = Result<Value, &'static str>;
 
 impl Value {
+    pub fn stringify(&self, objects: &ObjectList) -> String {
+        // TODO: Stringify shouldn't require heap allocation, except for doubles
+        // and it's only for display, so doubles don't need to be allocated either
+        match self {
+            Value::Nil => "nil".to_string(),
+            Value::Double(val) => val.to_string(),
+            Value::Bool(val) => val.to_string(),
+            Value::Obj(val) => match &**val {
+                Object::String(str) => objects.strings.get_by_index(str.index).to_owned(),
+            },
+        }
+    }
+
     pub fn is_truthy(&self) -> bool {
         match self {
             Value::Bool(val) => !val,
@@ -44,52 +55,32 @@ impl Value {
         Value::compare(&lhs, &rhs, PartialOrd::lt)
     }
 
+    // Cannot be std::core::ops::Add because it needs to know how to add
+    // newly allocated string to ObjectList
+    pub fn add(self, rhs: Self, objects: &mut ObjectList) -> ValueResult {
+        if let (Value::Double(lhs), Value::Double(rhs)) = (&self, &rhs) {
+            Ok(Value::Double(lhs + rhs))
+        } else if let (Value::Obj(lhs), Value::Obj(rhs)) = (self, rhs) {
+            if let (Object::String(lhs), Object::String(rhs)) = (lhs.as_ref(), rhs.as_ref()) {
+                let concatenated = objects.strings.get_by_index(lhs.index).to_owned()
+                    + objects.strings.get_by_index(rhs.index);
+
+                let obj_string = objects.add_string(concatenated);
+
+                Ok(Value::Obj(obj_string))
+            } else {
+                Err("Operands must be numbers or strings")
+            }
+        } else {
+            Err("Operands must be numbers or strings")
+        }
+    }
+
     fn compare(&self, other: &Value, op: impl FnOnce(&f32, &f32) -> bool) -> ValueResult {
         if let (Value::Double(lhs), Value::Double(rhs)) = (self, other) {
             Ok(Value::Bool(op(lhs, rhs)))
         } else {
             Err("Operands must be numbers")
-        }
-    }
-
-    fn compare_strings(&self, interned_strings: HashSet<ObjString>, rhs: &Value) -> bool {
-        todo!();
-    }
-
-    fn as_string(&self) -> Option<&ObjString> {
-        if let Value::Obj(obj) = self {
-            match obj.as_ref() {
-                Object::String(str) => Some(str),
-                _ => None,
-            }
-        } else {
-            None
-        }
-    }
-
-    fn copy(&self, interned_strings: HashSet<String>) -> Value {
-        todo!();
-        /*if let Some(str) = self.as_string() {
-            if let Some(existing_string) = interned_strings.get(&str.string) {
-                Value::Obj(Object::from_string(existing_string))
-            }
-            else {
-                Value::Obj(Object::from_string(str.string)
-            }
-        }
-        else {
-
-        }*/
-    }
-}
-
-impl Display for Value {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Value::Nil => write!(f, "nil"),
-            Value::Double(val) => write!(f, "{}", val),
-            Value::Bool(val) => write!(f, "{}", val),
-            Value::Obj(val) => write!(f, "{}", val),
         }
     }
 }
@@ -111,26 +102,6 @@ impl Not for Value {
 
     fn not(self) -> Self::Output {
         Ok(Value::Bool(!self.is_truthy()))
-    }
-}
-
-impl Add for Value {
-    type Output = ValueResult;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        if let (Value::Double(lhs), Value::Double(rhs)) = (&self, &rhs) {
-            Ok(Value::Double(lhs + rhs))
-        } else if let (Value::Obj(lhs), Value::Obj(rhs)) = (self, rhs) {
-            if let (Object::String(lhs), Object::String(rhs)) = (lhs.as_ref(), rhs.as_ref()) {
-                Ok(Value::Obj(Object::from_string(
-                    lhs.string.clone() + &rhs.string,
-                )))
-            } else {
-                Err("Operands must be numbers or strings")
-            }
-        } else {
-            Err("Operands must be numbers or strings")
-        }
     }
 }
 
@@ -166,6 +137,17 @@ impl Div for Value {
             Ok(Value::Double(lhs / rhs))
         } else {
             Err("Operands must be numbers")
+        }
+    }
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Double(l0), Self::Double(r0)) => l0 == r0,
+            (Self::Bool(l0), Self::Bool(r0)) => l0 == r0,
+            (Self::Obj(l0), Self::Obj(r0)) => l0 == r0,
+            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
         }
     }
 }

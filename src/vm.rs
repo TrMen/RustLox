@@ -1,13 +1,7 @@
-use std::{
-    collections::HashSet,
-    ops::{Neg, Not},
-    rc::Rc,
-};
-
 use crate::{
     assembler,
     chunk::{Chunk, CodeIndex, OpCode},
-    object::{Object, ObjectList},
+    object::ObjectList,
     value::{print_vec_val, Value},
 };
 
@@ -20,8 +14,7 @@ pub struct VM {
     chunk: Chunk,
     ip: CodeIndex, // instruction pointer points at the instruction about to be executed at all times
     stack: Vec<Value>,
-    objects: ObjectList,
-    strings: HashSet<String>,
+    pub objects: ObjectList,
 }
 
 impl VM {
@@ -31,7 +24,6 @@ impl VM {
             ip: 0,
             stack: Vec::with_capacity(512),
             objects,
-            strings: HashSet::new(),
         }
     }
 
@@ -43,7 +35,7 @@ impl VM {
             let instruction = self.chunk.instruction_at(self.ip);
 
             if instruction.is_none() {
-                println!("\nObjects at end: {}", self.objects);
+                println!("\nObjectList at end: {:?}", self.objects);
                 print_vec_val(&self.stack);
                 print_vec_val(&self.chunk.constants);
                 return Ok(()); // Done interpreting
@@ -54,7 +46,7 @@ impl VM {
                 print!("          ");
 
                 for value in &self.stack {
-                    print!("[ {} ]", value);
+                    print!("[ {} ]", value.stringify(&self.objects));
                 }
 
                 println!();
@@ -74,7 +66,7 @@ impl VM {
         match instruction {
             OpCode::Return => {
                 if let Some(stack_top) = self.stack.pop() {
-                    print!("{}", stack_top);
+                    print!("{}", stack_top.stringify(&self.objects));
                 }
             }
             OpCode::Constant => {
@@ -85,7 +77,32 @@ impl VM {
             }
             OpCode::Negate => self.unary_op(std::ops::Neg::neg)?,
             OpCode::Not => self.unary_op(std::ops::Not::not)?,
-            OpCode::Add => self.binary_op(std::ops::Add::add)?,
+            OpCode::Add => {
+                // TODO: This duplicated binary_op, because otherwise we run into borrowing issues with the closure
+                // But it shouldn't need to do that.
+
+                let rhs = self.pop(); // This order is intended
+                let lhs = self.pop(); // If lhs is evaluated first, it will be below rhs on a stack
+
+                let val = match Value::add(lhs, rhs, &mut self.objects) {
+                    Err(msg) => {
+                        return Err(RuntimeError {
+                            msg: String::from(msg),
+                        });
+                    }
+                    Ok(val) => {
+                        if let Value::Obj(obj) = &val {
+                            self.objects.add_existing_object(obj.clone());
+                        }
+
+                        val
+                    }
+                };
+
+                self.stack.push(val);
+
+                Ok(())
+            }?,
             OpCode::Subtract => self.binary_op(std::ops::Sub::sub)?,
             OpCode::Multiply => self.binary_op(std::ops::Mul::mul)?,
             OpCode::Divide => self.binary_op(std::ops::Div::div)?,
@@ -120,7 +137,7 @@ impl VM {
     ) -> Result<(), RuntimeError> {
         let val = self.stack.last_mut().expect("Stack empty");
 
-        println!("Unary op on '{}'", &val);
+        println!("Unary op on '{:?}'", &val);
 
         *val = match op(val.clone()) {
             Err(msg) => {

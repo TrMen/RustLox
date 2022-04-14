@@ -1,6 +1,11 @@
+#![feature(hash_set_entry)]
+#![feature(build_hasher_simple_hash_one)]
+#![feature(once_cell)]
+
 mod assembler;
 mod chunk;
 mod compiler;
+mod indexable_string_set;
 mod object;
 mod parser;
 mod precedence;
@@ -56,11 +61,8 @@ fn repl() -> Result<(), io::Error> {
 
         println!("Interpreting  \"{}\"\n", buf.trim_end());
 
-        match interpret(buf) {
-            Err(InterpretationError::Compiletime) => exit(65),
-            Err(InterpretationError::Runtime) => exit(70),
-            Ok(()) => return Ok(()),
-        }
+        // Ignore error to keep the repl going
+        let _ = interpret(buf);
     }
 }
 

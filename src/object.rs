@@ -1,12 +1,21 @@
-use std::{collections::HashSet, fmt::Display, rc::Rc};
+use std::rc::Rc;
+
+use crate::indexable_string_set::IndexableStringSet;
 
 pub trait LoxObject {
     // Common information for garbage collection
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, Debug)]
 pub struct ObjString {
-    pub string: String,
+    pub index: usize, // Index in the string interning list. Since that list only ever grows, the string should always exist at that index
+}
+
+impl PartialEq for ObjString {
+    fn eq(&self, other: &Self) -> bool {
+        // Interning means two equal strings will always have the same index
+        self.index == other.index
+    }
 }
 
 impl LoxObject for ObjString {}
@@ -17,55 +26,37 @@ pub enum Object {
     String(ObjString),
 }
 
-impl Object {
-    pub fn from_string(string: String) -> Rc<Object> {
-        Rc::new(Object::String(ObjString { string }))
-    }
-}
-
+#[derive(Debug)]
 pub struct ObjectList {
     objects: Vec<Rc<Object>>,
-    // Strings are interned (deduplicated). Any two identical strings will Rc to the same ObjString
-    strings: HashSet<String>,
+
+    pub strings: IndexableStringSet,
 }
 
 impl ObjectList {
     pub fn new() -> ObjectList {
         ObjectList {
             objects: Vec::new(),
-            strings: HashSet::new(),
+            strings: IndexableStringSet::new(),
         }
     }
 
-    pub fn add_from_string(&mut self, string: String) -> Rc<Object> {
-        let string_object = Object::from_string(string);
+    pub fn add_string(&mut self, string: String) -> Rc<Object> {
+        // TODO: Theoretically slightly unneeded to recompute hash here
+        // since we could've just stored string and hash in the interned list
+        let index = self.strings.get_or_insert(string);
 
+        let string_object = Rc::new(Object::String(ObjString { index }));
+
+        // Note: Two different objects can have the same string, so 2 entries in obj list,
+        // but only one in string list
         self.objects.push(string_object);
 
         self.objects.last().unwrap().clone()
     }
 
     pub fn add_existing_object(&mut self, object: Rc<Object>) {
+        // TODO: This prolly shouldn't exist. All objects should start by being created in the list
         self.objects.push(object);
-    }
-}
-
-impl Display for Object {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Object::String(obj) => write!(f, "{}", obj.string),
-        }
-    }
-}
-
-impl Display for ObjectList {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[")?;
-
-        for object in &self.objects {
-            write!(f, "{}({}), ", object, Rc::strong_count(object))?;
-        }
-
-        write!(f, "]")
     }
 }
