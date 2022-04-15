@@ -28,7 +28,7 @@ impl IndexableStringSet {
 
         while let Some(existing_str) = &self.strings[index] {
             if existing_str == &string {
-                break;
+                return index;
             } else {
                 // TODO: Improve reprobing
                 index = (index + 1) % self.strings.len();
