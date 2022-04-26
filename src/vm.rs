@@ -42,10 +42,13 @@ impl VM {
             let instruction = self.chunk.instruction_at(self.ip);
 
             if instruction.is_none() {
-                println!("\nObjectList: {:?}", self.objects);
-                print_vec_val(&self.stack);
-                print_vec_val(&self.chunk.constants);
-                println!("\nGlobals: {:?}", self.globals);
+                if cfg!(debug_assertions) {
+                    println!("\nObjectList: {:?}", self.objects);
+                    print_vec_val(&self.stack);
+                    print_vec_val(&self.chunk.constants);
+                    println!("\nGlobals: {:?}", self.globals);
+                    println!("\nStrings: {:?}", self.strings);
+                }
                 return Ok(()); // Done interpreting
             }
 

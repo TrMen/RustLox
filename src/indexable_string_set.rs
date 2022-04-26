@@ -21,14 +21,14 @@ impl IndexableStringSet {
         self.strings[index].as_ref().unwrap()
     }
 
-    pub fn get_or_insert(&mut self, string: String) -> usize {
-        let mut index = self.hash(&string) as usize % self.strings.len();
+    fn get_insert_index_of(&mut self, string: &str) -> Result<usize, usize> {
+        let mut index = self.hash(string) as usize % self.strings.len();
 
         let start = index;
 
         while let Some(existing_str) = &self.strings[index] {
-            if existing_str == &string {
-                return index;
+            if existing_str == string {
+                return Ok(index);
             } else {
                 // TODO: Improve reprobing
                 index = (index + 1) % self.strings.len();
@@ -38,9 +38,27 @@ impl IndexableStringSet {
             }
         }
 
-        self.strings[index] = Some(string);
+        Err(index)
+    }
 
-        index
+    pub fn get_or_insert(&mut self, str: &str) -> usize {
+        match self.get_insert_index_of(str) {
+            Ok(existing_index) => existing_index,
+            Err(insert_index) => {
+                self.strings[insert_index] = Some(str.to_owned());
+                insert_index
+            }
+        }
+    }
+
+    pub fn get_or_insert_existing(&mut self, string: String) -> usize {
+        match self.get_insert_index_of(&string) {
+            Ok(existing_index) => existing_index,
+            Err(insert_index) => {
+                self.strings[insert_index] = Some(string);
+                insert_index
+            }
+        }
     }
 
     fn grow(&mut self) {

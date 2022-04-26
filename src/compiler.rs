@@ -198,10 +198,10 @@ impl<'src> Compiler<'src> {
     }
 
     // TODO: This belongs in chunks
-    fn add_identifier_constant(&mut self, name: String) -> ConstantIndex {
+    fn add_identifier_constant(&mut self, name: &str) -> ConstantIndex {
         match self
             .chunk
-            .add_constant(Value::Obj(Object::from_string(name, &mut self.strings)))
+            .add_constant(Value::Obj(Object::from_str(name, &mut self.strings)))
         {
             Ok(constant_index) => constant_index,
             Err(msg) => {
@@ -224,7 +224,7 @@ impl<'src> Compiler<'src> {
     fn parse_variable(&mut self, err_msg: &str) -> ConstantIndex {
         self.parser.consume(TokenKind::Identifier, err_msg);
 
-        self.add_identifier_constant(self.parser.previous.lexeme.to_string())
+        self.add_identifier_constant(self.parser.previous.lexeme)
     }
 
     fn declaration(&mut self) {
@@ -292,8 +292,7 @@ impl<'src> Compiler<'src> {
     }
 
     fn string(&mut self) {
-        let string_obj =
-            Object::from_string(self.parser.previous.lexeme.to_string(), &mut self.strings);
+        let string_obj = Object::from_str(self.parser.previous.lexeme, &mut self.strings);
 
         // Note: String deliberately not added to ObjectList because constants
         // should not be tracked by gc
@@ -312,10 +311,10 @@ impl<'src> Compiler<'src> {
     }
 
     fn variable(&mut self) {
-        self.named_variable(self.parser.previous.lexeme.to_string());
+        self.named_variable(self.parser.previous.lexeme);
     }
 
-    fn named_variable(&mut self, name: String) {
+    fn named_variable(&mut self, name: &str) {
         // GetGlobal has a constant index as arg
         let constant_index = self.add_identifier_constant(name);
         self.emit_op(OpCode::GetGlobal);
