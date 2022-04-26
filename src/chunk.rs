@@ -12,6 +12,7 @@ pub type CodeIndex = usize;
 pub enum OpCode {
     GetGlobal,
     DefineGlobal,
+    SetGlobal,
     Pop,
     Print,
     Return,
@@ -34,6 +35,66 @@ impl OpCode {
     pub fn from_u8(val: u8) -> Option<OpCode> {
         FromPrimitive::from_u8(val)
     }
+}
+
+impl From<OpCodeWithArg> for OpCode {
+    fn from(op: OpCodeWithArg) -> Self {
+        match op {
+            OpCodeWithArg::DefineGlobal => Self::DefineGlobal,
+            OpCodeWithArg::GetGlobal => Self::GetGlobal,
+            OpCodeWithArg::SetGlobal => Self::SetGlobal,
+            OpCodeWithArg::Constant => Self::Constant,
+        }
+    }
+}
+
+impl From<OpCodeWithoutArg> for OpCode {
+    fn from(op: OpCodeWithoutArg) -> Self {
+        match op {
+            OpCodeWithoutArg::Pop => OpCode::Pop,
+            OpCodeWithoutArg::Print => OpCode::Print,
+            OpCodeWithoutArg::Return => OpCode::Return,
+            OpCodeWithoutArg::Nil => OpCode::Nil,
+            OpCodeWithoutArg::True => OpCode::True,
+            OpCodeWithoutArg::False => OpCode::False,
+            OpCodeWithoutArg::Equal => OpCode::Equal,
+            OpCodeWithoutArg::Greater => OpCode::Greater,
+            OpCodeWithoutArg::Less => OpCode::Less,
+            OpCodeWithoutArg::Negate => OpCode::Negate,
+            OpCodeWithoutArg::Add => OpCode::Add,
+            OpCodeWithoutArg::Subtract => OpCode::Subtract,
+            OpCodeWithoutArg::Multiply => OpCode::Multiply,
+            OpCodeWithoutArg::Divide => OpCode::Divide,
+            OpCodeWithoutArg::Not => OpCode::Not,
+        }
+    }
+}
+
+#[repr(u8)]
+pub enum OpCodeWithArg {
+    GetGlobal,
+    DefineGlobal,
+    SetGlobal,
+    Constant,
+}
+
+#[repr(u8)]
+pub enum OpCodeWithoutArg {
+    Pop,
+    Print,
+    Return,
+    Nil,
+    True,
+    False,
+    Equal,
+    Greater,
+    Less,
+    Negate,
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Not,
 }
 
 #[derive(Debug)]

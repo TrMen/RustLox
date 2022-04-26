@@ -1,5 +1,5 @@
 use crate::{
-    chunk::{Chunk, ConstantIndex, OpCode},
+    chunk::{Chunk, ConstantIndex, OpCodeWithArg, OpCodeWithoutArg},
     indexable_string_set::IndexableStringSet,
     object::{Object, ObjectList},
     parser::Parser,
@@ -117,7 +117,7 @@ impl<'src> Compiler<'src> {
     fn end_compilation(
         mut self,
     ) -> Result<(Chunk, ObjectList, IndexableStringSet), CompiletimeError> {
-        self.emit_op(OpCode::Return);
+        self.emit_op(OpCodeWithoutArg::Return);
 
         if self.parser.had_error {
             Err(CompiletimeError {
@@ -128,25 +128,27 @@ impl<'src> Compiler<'src> {
         }
     }
 
-    fn emit_op(&mut self, op: OpCode) {
+    fn emit_op(&mut self, op: OpCodeWithoutArg) {
         let line = self.parser.previous.line;
-        self.chunk.append_op(op, line);
+        self.chunk.append_op(op.into(), line);
     }
 
-    fn emit_ops(&mut self, first: OpCode, second: OpCode) {
+    fn emit_ops(&mut self, first: OpCodeWithoutArg, second: OpCodeWithoutArg) {
         self.emit_op(first);
         self.emit_op(second);
     }
 
-    fn emit_constant_index(&mut self, constant_index: ConstantIndex) {
+    fn emit_op_with_arg(&mut self, op: OpCodeWithArg, arg: ConstantIndex) {
+        // Op
         let line = self.parser.previous.line;
+        self.chunk.append_op(op.into(), line);
 
-        self.chunk.append_constant_index(constant_index, line);
+        // Constant index arg
+        let line = self.parser.previous.line;
+        self.chunk.append_constant_index(arg, line);
     }
 
     fn emit_constant(&mut self, value: Value) {
-        self.emit_op(OpCode::Constant);
-
         let constant_index = match self.chunk.add_constant(value) {
             Ok(constant_index) => constant_index,
             Err(err_message) => {
@@ -155,7 +157,7 @@ impl<'src> Compiler<'src> {
             }
         };
 
-        self.emit_constant_index(constant_index)
+        self.emit_op_with_arg(OpCodeWithArg::Constant, constant_index);
     }
 
     fn parse_precedence(&mut self, prec: Prec) {
@@ -213,9 +215,7 @@ impl<'src> Compiler<'src> {
 
     fn define_variable(&mut self, global: ConstantIndex) {
         // Essentially, this is emit_constant, but with a different opcode
-        self.emit_op(OpCode::DefineGlobal);
-
-        self.emit_constant_index(global);
+        self.emit_op_with_arg(OpCodeWithArg::DefineGlobal, global);
     }
 
     // --------------------------------Parsing methods--------------------------------
@@ -245,7 +245,7 @@ impl<'src> Compiler<'src> {
         if self.parser.match_advance(TokenKind::Equal) {
             self.expression();
         } else {
-            self.emit_op(OpCode::Nil);
+            self.emit_op(OpCodeWithoutArg::Nil);
         }
 
         self.parser.consume(
@@ -268,14 +268,14 @@ impl<'src> Compiler<'src> {
         self.expression();
         self.parser
             .consume(TokenKind::Semicolon, "Expect ';' after expression.");
-        self.emit_op(OpCode::Pop);
+        self.emit_op(OpCodeWithoutArg::Pop);
     }
 
     fn print_statement(&mut self) {
         self.expression();
         self.parser
             .consume(TokenKind::Semicolon, "Expect ';' after value.");
-        self.emit_op(OpCode::Print);
+        self.emit_op(OpCodeWithoutArg::Print);
     }
 
     fn expression(&mut self) {
@@ -284,9 +284,9 @@ impl<'src> Compiler<'src> {
 
     fn literal(&mut self) {
         match self.parser.previous.kind {
-            TokenKind::False => self.emit_op(OpCode::False),
-            TokenKind::True => self.emit_op(OpCode::True),
-            TokenKind::Nil => self.emit_op(OpCode::Nil),
+            TokenKind::False => self.emit_op(OpCodeWithoutArg::False),
+            TokenKind::True => self.emit_op(OpCodeWithoutArg::True),
+            TokenKind::Nil => self.emit_op(OpCodeWithoutArg::Nil),
             _ => (),
         }
     }
@@ -317,8 +317,13 @@ impl<'src> Compiler<'src> {
     fn named_variable(&mut self, name: &str) {
         // GetGlobal has a constant index as arg
         let constant_index = self.add_identifier_constant(name);
-        self.emit_op(OpCode::GetGlobal);
-        self.emit_constant_index(constant_index);
+
+        if self.parser.match_advance(TokenKind::Equal) {
+            self.expression();
+            self.emit_op_with_arg(OpCodeWithArg::SetGlobal, constant_index);
+        } else {
+            self.emit_op_with_arg(OpCodeWithArg::GetGlobal, constant_index);
+        }
     }
 
     fn grouping(&mut self) {
@@ -335,8 +340,8 @@ impl<'src> Compiler<'src> {
 
         // Emit the operator instruction (remember: stack-based -> operator after operands)
         match operator_kind {
-            TokenKind::Bang => self.emit_op(OpCode::Not),
-            TokenKind::Minus => self.emit_op(OpCode::Negate),
+            TokenKind::Bang => self.emit_op(OpCodeWithoutArg::Not),
+            TokenKind::Minus => self.emit_op(OpCodeWithoutArg::Negate),
             _ => panic!(
                 "Bad operator '{}' before unary operand '{:?}'",
                 operator_kind, self.parser.previous
@@ -357,16 +362,16 @@ impl<'src> Compiler<'src> {
 
         // After operands, emit bytecode for operator
         match operator_kind {
-            TokenKind::Plus => self.emit_op(OpCode::Add),
-            TokenKind::Minus => self.emit_op(OpCode::Subtract),
-            TokenKind::Star => self.emit_op(OpCode::Multiply),
-            TokenKind::Slash => self.emit_op(OpCode::Divide),
-            TokenKind::Greater => self.emit_op(OpCode::Greater),
-            TokenKind::GreaterEqual => self.emit_ops(OpCode::Less, OpCode::Not),
-            TokenKind::Less => self.emit_op(OpCode::Less),
-            TokenKind::LessEqual => self.emit_ops(OpCode::Greater, OpCode::Not),
-            TokenKind::EqualEqual => self.emit_op(OpCode::Equal),
-            TokenKind::BangEqual => self.emit_ops(OpCode::Equal, OpCode::Not),
+            TokenKind::Plus => self.emit_op(OpCodeWithoutArg::Add),
+            TokenKind::Minus => self.emit_op(OpCodeWithoutArg::Subtract),
+            TokenKind::Star => self.emit_op(OpCodeWithoutArg::Multiply),
+            TokenKind::Slash => self.emit_op(OpCodeWithoutArg::Divide),
+            TokenKind::Greater => self.emit_op(OpCodeWithoutArg::Greater),
+            TokenKind::GreaterEqual => self.emit_ops(OpCodeWithoutArg::Less, OpCodeWithoutArg::Not),
+            TokenKind::Less => self.emit_op(OpCodeWithoutArg::Less),
+            TokenKind::LessEqual => self.emit_ops(OpCodeWithoutArg::Greater, OpCodeWithoutArg::Not),
+            TokenKind::EqualEqual => self.emit_op(OpCodeWithoutArg::Equal),
+            TokenKind::BangEqual => self.emit_ops(OpCodeWithoutArg::Equal, OpCodeWithoutArg::Not),
             invalid => panic!("Invalid operator type in binary expression: {}", invalid),
         }
     }
@@ -375,6 +380,7 @@ impl<'src> Compiler<'src> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chunk::OpCode;
     #[test]
     fn parse_precedence_ordering() {
         // Making sure the PartialOrd works as expected (things declared earlier in the enum are lesser)
@@ -431,7 +437,7 @@ mod tests {
 
     #[test]
     fn compile_number() {
-        let (chunk, _, _) = Compiler::compile("1").expect("Compilation failed");
+        let (chunk, _, _) = Compiler::compile("1;").expect("Compilation failed");
 
         assert_eq!(OpCode::from_u8(chunk.code[0]).unwrap(), OpCode::Constant);
         assert_eq!(chunk.constant_at_code_index(1), &Value::Double(1.0));
@@ -439,7 +445,7 @@ mod tests {
 
     #[test]
     fn compile_add() {
-        let (chunk, _, _) = Compiler::compile("1+2").expect("Compilation failed");
+        let (chunk, _, _) = Compiler::compile("1+2;").expect("Compilation failed");
 
         assert_eq!(OpCode::from_u8(chunk.code[0]).unwrap(), OpCode::Constant);
         assert_eq!(chunk.constant_at_code_index(1), &Value::Double(1.0));
