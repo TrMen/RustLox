@@ -3,14 +3,28 @@ use std::collections::HashMap;
 use crate::{
     assembler,
     chunk::{Chunk, CodeIndex, OpCode},
+    compiler::{Compiler, CompiletimeError},
     indexable_string_set::IndexableStringSet,
     object::ObjectList,
     value::{print_vec_val, Value},
 };
 
+#[derive(Clone, PartialEq)]
+pub enum InterpretationMode {
+    Repl,
+    File(String),
+    // TODO: Can add things like strict-file, ahead-of-time-compile, etc.
+}
+
 #[derive(Debug, PartialEq)]
 pub struct RuntimeError {
     pub msg: String,
+}
+
+#[derive(Debug)]
+pub enum InterpretationError {
+    Runtime(RuntimeError),
+    Compiletime(CompiletimeError),
 }
 
 pub struct VM {
@@ -18,25 +32,67 @@ pub struct VM {
     ip: CodeIndex, // instruction pointer points at the instruction about to be executed at all times
     stack: Vec<Value>,
     pub objects: ObjectList,
-    pub strings: IndexableStringSet,
+    pub interned_strings: IndexableStringSet,
     globals: HashMap<String, Value>,
-    source_name: String,
+    mode: InterpretationMode,
 }
 
 impl VM {
-    pub fn new(objects: ObjectList, strings: IndexableStringSet, source_name: String) -> VM {
+    #[allow(dead_code)]
+    pub fn new_with_precompiled(
+        objects: ObjectList,
+        interned_strings: IndexableStringSet,
+        mode: InterpretationMode,
+    ) -> VM {
         VM {
             chunk: Chunk::new(),
             ip: 0,
             stack: Vec::with_capacity(512),
             objects,
-            strings,
+            interned_strings,
             globals: HashMap::new(),
-            source_name,
+            mode,
         }
     }
 
-    pub fn interpret(&mut self, chunk: Chunk) -> Result<(), RuntimeError> {
+    pub fn new_without_input(mode: InterpretationMode) -> VM {
+        VM {
+            chunk: Chunk::new(),
+            ip: 0,
+            stack: Vec::with_capacity(512),
+            objects: ObjectList::new(),
+            interned_strings: IndexableStringSet::new(),
+            globals: HashMap::new(),
+            mode,
+        }
+    }
+
+    pub fn compile_and_interpret(
+        &mut self,
+        source: &str,
+    ) -> Result<(&Chunk, &ObjectList, &IndexableStringSet), InterpretationError> {
+        let (chunk, object_list, interned_strings) = Compiler::compile(source, self.mode.clone())
+            .map_err(InterpretationError::Compiletime)?;
+
+        self.objects.merge(object_list);
+        // TODO: Replace with merge
+        self.interned_strings = interned_strings;
+        // self.interned_strings.merge(interned_strings);
+
+        self.interpret(chunk).map_err(InterpretationError::Runtime)
+    }
+
+    pub fn interpret(
+        &mut self,
+        chunk: Chunk,
+    ) -> Result<(&Chunk, &ObjectList, &IndexableStringSet), RuntimeError> {
+        if cfg!(debug_assertions) {
+            assembler::disassemble(&chunk, "code");
+
+            println!("\nStart of interpretation\n");
+            println!("{:04} {:4} {:-16} constant", "ip", "line", "Instruction");
+        }
+
         self.ip = 0;
         self.chunk = chunk;
 
@@ -49,10 +105,11 @@ impl VM {
                     print_vec_val(&self.stack);
                     print_vec_val(&self.chunk.constants);
                     println!("\nGlobals: {:?}", self.globals);
-                    println!("\nStrings: {:?}", self.strings);
+                    println!("\nStrings: {:?}", self.interned_strings);
                 }
 
-                return Ok(()); // Done interpreting
+                return Ok((&self.chunk, &self.objects, &self.interned_strings));
+                // Done interpreting
             }
 
             if cfg!(debug_assertions) {
@@ -60,7 +117,7 @@ impl VM {
                 print!("          ");
 
                 for value in &self.stack {
-                    print!("[ {} ]", value.stringify(&self.strings));
+                    print!("[ {} ]", value.stringify(&self.interned_strings));
                 }
 
                 println!();
@@ -69,13 +126,18 @@ impl VM {
             self.ip += 1; // ip must always point to the next instruction while executing the last
 
             if let Err(mut err) = self.execute_instruction(instruction.unwrap()) {
+                let source_name = match &self.mode {
+                    InterpretationMode::Repl => String::from("Repl"),
+                    InterpretationMode::File(filename) => filename.clone(),
+                };
+
                 err.msg = format!(
                     "{}\n [line {}] in {}",
                     err.msg,
                     self.chunk
                         .get_line(self.ip - 1) // Last op, because ip always points at the op about to execute
                         .expect("No line saved for current instruction"),
-                    self.source_name,
+                    source_name,
                 );
 
                 self.stack.clear();
@@ -89,7 +151,7 @@ impl VM {
         match instruction {
             OpCode::Return => {
                 if let Some(stack_top) = self.stack.pop() {
-                    print!("{}", stack_top.stringify(&self.strings));
+                    print!("{}", stack_top.stringify(&self.interned_strings));
                 }
             }
             OpCode::Constant => {
@@ -106,7 +168,8 @@ impl VM {
                 let rhs = self.pop(); // This order is intended
                 let lhs = self.pop(); // If lhs is evaluated first, it will be below rhs on a stack
 
-                let val = match Value::add(lhs, rhs, &mut self.strings, &mut self.objects) {
+                let val = match Value::add(lhs, rhs, &mut self.interned_strings, &mut self.objects)
+                {
                     Err(msg) => {
                         return Err(RuntimeError {
                             msg: String::from(msg),
@@ -142,23 +205,30 @@ impl VM {
             OpCode::Print => {
                 let val = self.pop();
 
-                println!("{}", val.stringify(&self.strings));
+                println!("{}", val.stringify(&self.interned_strings));
             }
             OpCode::Pop => {
                 self.stack.pop();
             }
             OpCode::DefineGlobal => {
-                let identifier = self.read_constant().as_str(&self.strings);
+                let identifier = self.read_constant().as_str(&self.interned_strings);
 
-                self.globals
-                    .insert(identifier.to_owned(), self.peek().clone());
+                let existing = self
+                    .globals
+                    .insert(identifier.to_string(), self.peek().clone());
+
+                if existing.is_some() {
+                    return Err(RuntimeError {
+                        msg: format!("Redefiniton of global variable '{identifier}'"),
+                    });
+                }
 
                 // Don't pop the value till after insertion into globals,
                 // to prevent GC cleanup while we're inserting
                 self.pop();
             }
             OpCode::GetGlobal => {
-                let identifier = self.read_constant().as_str(&self.strings);
+                let identifier = self.read_constant().as_str(&self.interned_strings);
 
                 if let Some(val) = self.globals.get(identifier) {
                     self.stack.push(val.clone());
@@ -169,7 +239,7 @@ impl VM {
                 }
             }
             OpCode::SetGlobal => {
-                let identifier = self.read_constant().as_str(&self.strings);
+                let identifier = self.read_constant().as_str(&self.interned_strings);
 
                 // Note: Don't pop the value off the stack in case the assignment is
                 // nested in a bigger expression.
@@ -255,20 +325,32 @@ impl VM {
 
 #[cfg(test)]
 mod tests {
-    use crate::compiler::Compiler;
+    use std::assert_matches::debug_assert_matches;
 
     use super::*;
 
     #[test]
     fn constant() {
-        let mut vm = VM::new(
-            ObjectList::new(),
-            IndexableStringSet::new(),
-            "constant_test".to_string(),
-        );
+        let mut vm = VM::new_without_input(InterpretationMode::Repl);
 
-        let (chunk, _, _) = Compiler::compile("1;").unwrap();
+        vm.compile_and_interpret("1;").expect("Compilaton failed");
+    }
 
-        assert_eq!(vm.interpret(chunk), Ok(()));
+    #[test]
+    fn undefined_var_is_comptime_error_in_file_mode() {
+        let mut vm = VM::new_without_input(InterpretationMode::File(String::from("Unit Test")));
+
+        let result = vm.compile_and_interpret("print undef;");
+
+        debug_assert_matches!(result, Err(InterpretationError::Compiletime(_)));
+    }
+
+    #[test]
+    fn undefined_var_is_runtime_error_in_repl_mode() {
+        let mut vm = VM::new_without_input(InterpretationMode::Repl);
+
+        let result = vm.compile_and_interpret("print undef;");
+
+        debug_assert_matches!(result, Err(InterpretationError::Runtime(_)));
     }
 }

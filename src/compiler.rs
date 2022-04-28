@@ -1,11 +1,14 @@
+use std::{collections::HashSet, hash::Hash};
+
 use crate::{
     chunk::{Chunk, ConstantIndex, OpCodeWithArg, OpCodeWithoutArg},
     indexable_string_set::IndexableStringSet,
     object::{Object, ObjectList},
     parser::Parser,
     precedence::{Prec, Precedence},
-    scanner::TokenKind,
+    scanner::{Token, TokenKind},
     value::Value,
+    vm::InterpretationMode,
 };
 
 // Used to pass extra information to the specific ParseFn
@@ -93,24 +96,57 @@ pub struct CompiletimeError {
     pub msg: String,
 }
 
+#[derive(Eq)]
+enum UsedGlobal<'src> {
+    // Index in interned_strings IndexableStringSet
+    Defined(&'src str),
+    Accessed(Token<'src>),
+}
+
+impl<'src> PartialEq for UsedGlobal<'src> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Defined(l0), Self::Defined(r0)) => l0 == r0,
+            (Self::Accessed(l0), Self::Accessed(r0)) => l0.lexeme == r0.lexeme,
+            (UsedGlobal::Defined(l0), UsedGlobal::Accessed(r0)) => *l0 == r0.lexeme,
+            (UsedGlobal::Accessed(l0), UsedGlobal::Defined(r0)) => l0.lexeme == *r0,
+        }
+    }
+}
+
+impl<'src> Hash for UsedGlobal<'src> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            UsedGlobal::Defined(identifier) => identifier,
+            UsedGlobal::Accessed(token) => token.lexeme,
+        }
+        .hash(state)
+    }
+}
+
 pub struct Compiler<'src> {
     rules: [ParseRule<'src>; TokenKind::VARIANT_COUNT],
     parser: Parser<'src>,
     chunk: Chunk,
     objects: ObjectList,
-    strings: IndexableStringSet,
+    interned_strings: IndexableStringSet,
+    accessed_globals: HashSet<UsedGlobal<'src>>,
+    mode: InterpretationMode,
 }
 
 impl<'src> Compiler<'src> {
     pub fn compile(
         source: &str,
+        mode: InterpretationMode,
     ) -> Result<(Chunk, ObjectList, IndexableStringSet), CompiletimeError> {
         let mut compiler = Compiler {
             rules: init_rules(),
             parser: Parser::new(source),
             chunk: Chunk::new(),
             objects: ObjectList::new(),
-            strings: IndexableStringSet::new(),
+            interned_strings: IndexableStringSet::new(),
+            accessed_globals: HashSet::new(),
+            mode,
         };
 
         compiler.parser.advance();
@@ -127,12 +163,25 @@ impl<'src> Compiler<'src> {
     ) -> Result<(Chunk, ObjectList, IndexableStringSet), CompiletimeError> {
         self.emit_op(OpCodeWithoutArg::Return);
 
+        // Functions might be defined separately from use in repl, so don't report undefined globals
+        if self.mode != InterpretationMode::Repl {
+            for token in self.accessed_globals.iter().filter_map(|e| match e {
+                UsedGlobal::Accessed(token) => Some(token),
+                _ => None,
+            }) {
+                self.parser.report_error_at(
+                    token,
+                    &format!("Access of undefined global variable '{}'", token.lexeme,),
+                );
+            }
+        }
+
         if self.parser.had_error {
             Err(CompiletimeError {
-                msg: String::from("Compilaton failed!"),
+                msg: String::from("Compilation failed!"),
             })
         } else {
-            Ok((self.chunk, self.objects, self.strings))
+            Ok((self.chunk, self.objects, self.interned_strings))
         }
     }
 
@@ -223,10 +272,10 @@ impl<'src> Compiler<'src> {
 
     // TODO: This belongs in chunks
     fn add_identifier_constant(&mut self, name: &str) -> ConstantIndex {
-        match self
-            .chunk
-            .add_constant(Value::Obj(Object::from_str(name, &mut self.strings)))
-        {
+        match self.chunk.add_constant(Value::Obj(Object::from_str(
+            name,
+            &mut self.interned_strings,
+        ))) {
             Ok(constant_index) => constant_index,
             Err(msg) => {
                 self.parser.report_error_at_current(msg);
@@ -235,18 +284,22 @@ impl<'src> Compiler<'src> {
         }
     }
 
-    fn define_variable(&mut self, global: ConstantIndex) {
-        // Essentially, this is emit_constant, but with a different opcode
+    fn define_variable(&mut self, identifier: &'src str, global: ConstantIndex) {
+        self.accessed_globals
+            .insert(UsedGlobal::Defined(identifier));
         self.emit_op_with_arg(OpCodeWithArg::DefineGlobal, global);
     }
 
     // --------------------------------Parsing methods--------------------------------
 
     // Returns the index in the constant table that holds the variable name
-    fn parse_variable(&mut self, err_msg: &str) -> ConstantIndex {
+    fn parse_variable(&mut self, err_msg: &str) -> (&'src str, ConstantIndex) {
         self.parser.consume(TokenKind::Identifier, err_msg);
 
-        self.add_identifier_constant(self.parser.previous.lexeme)
+        (
+            self.parser.previous.lexeme,
+            self.add_identifier_constant(self.parser.previous.lexeme),
+        )
     }
 
     fn declaration(&mut self) {
@@ -262,7 +315,7 @@ impl<'src> Compiler<'src> {
     }
 
     fn var_declaration(&mut self) {
-        let global = self.parse_variable("Expect variable name.");
+        let (identifier, global) = self.parse_variable("Expect variable name.");
 
         if self.parser.match_advance(TokenKind::Equal) {
             self.expression();
@@ -275,7 +328,7 @@ impl<'src> Compiler<'src> {
             "Expect ';' after variable declaration.",
         );
 
-        self.define_variable(global);
+        self.define_variable(identifier, global);
     }
 
     fn statement(&mut self) {
@@ -314,7 +367,7 @@ impl<'src> Compiler<'src> {
     }
 
     fn string(&mut self, _: &ExtraInformation) {
-        let string_obj = Object::from_str(self.parser.previous.lexeme, &mut self.strings);
+        let string_obj = Object::from_str(self.parser.previous.lexeme, &mut self.interned_strings);
 
         // Note: String deliberately not added to ObjectList because constants
         // should not be tracked by gc
@@ -337,9 +390,14 @@ impl<'src> Compiler<'src> {
         self.named_variable(self.parser.previous.lexeme, can_assign);
     }
 
-    fn named_variable(&mut self, name: &str, can_assign: bool) {
-        // GetGlobal has a constant index as arg
+    fn named_variable(&mut self, name: &'src str, can_assign: bool) {
+        // TODO: A duplicating constant is added every time a variable is accessed.
+        // This can be avoided.
         let constant_index = self.add_identifier_constant(name);
+
+        // TODO: Is current correct?
+        self.accessed_globals
+            .get_or_insert(UsedGlobal::Accessed(self.parser.previous.clone()));
 
         if can_assign && self.parser.match_advance(TokenKind::Equal) {
             self.expression();
@@ -404,6 +462,7 @@ impl<'src> Compiler<'src> {
 mod tests {
     use super::*;
     use crate::chunk::OpCode;
+
     #[test]
     fn parse_precedence_ordering() {
         // Making sure the PartialOrd works as expected (things declared earlier in the enum are lesser)
@@ -460,7 +519,8 @@ mod tests {
 
     #[test]
     fn compile_number() {
-        let (chunk, _, _) = Compiler::compile("1;").expect("Compilation failed");
+        let (chunk, _, _) =
+            Compiler::compile("1;", InterpretationMode::Repl).expect("Compilation failed");
 
         assert_eq!(OpCode::from_u8(chunk.code[0]).unwrap(), OpCode::Constant);
         assert_eq!(chunk.constant_at_code_index(1), &Value::Double(1.0));
@@ -468,7 +528,8 @@ mod tests {
 
     #[test]
     fn compile_add() {
-        let (chunk, _, _) = Compiler::compile("1+2;").expect("Compilation failed");
+        let (chunk, _, _) =
+            Compiler::compile("1+2;", InterpretationMode::Repl).expect("Compilation failed");
 
         assert_eq!(OpCode::from_u8(chunk.code[0]).unwrap(), OpCode::Constant);
         assert_eq!(chunk.constant_at_code_index(1), &Value::Double(1.0));

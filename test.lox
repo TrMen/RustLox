@@ -9,3 +9,5 @@ breakfast = "Beignets with " + beverage; // Expression precedence between rhs an
 print breakfast;
 
 breakfast + "should_be_unassignable" = "boom";
+
+print undefined_variable; // Should be a compile-time error

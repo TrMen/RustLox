@@ -1,6 +1,6 @@
 #![feature(hash_set_entry)]
 #![feature(build_hasher_simple_hash_one)]
-#![feature(once_cell)]
+#![feature(assert_matches)]
 
 mod assembler;
 mod chunk;
@@ -21,40 +21,13 @@ use std::{
     process::exit,
 };
 
+use vm::{InterpretationError, InterpretationMode};
+
 use crate::vm::VM;
-use compiler::Compiler;
-
-enum InterpretationError {
-    Runtime,
-    Compiletime,
-}
-
-fn interpret(source: String, source_name: String) -> Result<(), InterpretationError> {
-    match Compiler::compile(&source) {
-        Err(e) => {
-            println!("Compiler-error: {}", e.msg);
-            Err(InterpretationError::Compiletime)
-        }
-        Ok((chunk, object_list, strings)) => {
-            if cfg!(debug_assertions) {
-                assembler::disassemble(&chunk, "code");
-
-                println!("\nStart of interpretation\n");
-                println!("{:04} {:4} {:-16} constant", "ip", "line", "Instruction");
-            }
-
-            let mut vm = VM::new(object_list, strings, source_name);
-
-            vm.interpret(chunk).map_err(|err| {
-                println!("Runtime Error: {}", err.msg);
-
-                InterpretationError::Runtime
-            })
-        }
-    }
-}
 
 fn repl() -> Result<(), io::Error> {
+    let mut vm = VM::new_without_input(InterpretationMode::Repl);
+
     loop {
         print!("> ");
         std::io::stdout().flush()?;
@@ -66,18 +39,31 @@ fn repl() -> Result<(), io::Error> {
         #[cfg(debug_assertions)]
         println!("Interpreting  \"{}\"\n", buf.trim_end());
 
-        // Ignore error to keep the repl going
-        let _ = interpret(buf, "repl".to_string());
+        match vm.compile_and_interpret(&buf) {
+            // Only print error and keep the repl going
+            Err(InterpretationError::Compiletime(e)) => eprintln!("Compiletime Error: {}", e.msg),
+            Err(InterpretationError::Runtime(e)) => eprintln!("Runtime Error: {}", e.msg),
+            Ok(_) => (),
+        }
     }
 }
 
 fn run_file(filename: String) -> Result<(), io::Error> {
-    let source_name = filename.to_string();
-    match interpret(std::fs::read_to_string(filename)?, source_name) {
-        Err(InterpretationError::Compiletime) => exit(65),
-        Err(InterpretationError::Runtime) => exit(70),
-        Ok(()) => Ok(()),
-    }
+    let mut vm = VM::new_without_input(InterpretationMode::File(filename.clone()));
+
+    match vm.compile_and_interpret(&std::fs::read_to_string(filename)?) {
+        Err(InterpretationError::Compiletime(e)) => {
+            eprintln!("Compiletime Error: {}", e.msg);
+            exit(20);
+        }
+        Err(InterpretationError::Runtime(e)) => {
+            eprintln!("Runtime Error: {}", e.msg);
+            exit(21);
+        }
+        Ok(_) => (),
+    };
+
+    Ok(())
 }
 
 fn main() {
@@ -93,7 +79,7 @@ fn main() {
             exit(42);
         }
     } else {
-        println!("Usage: clox [path]");
+        println!("Usage: Lox [path]");
         exit(64);
     }
 }

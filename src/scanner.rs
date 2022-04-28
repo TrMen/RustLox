@@ -6,7 +6,7 @@ use peekmore::{PeekMore, PeekMoreIterator};
 use strum_macros::Display;
 use variant_count::VariantCount;
 
-#[derive(Debug, Display, Clone, Copy, PartialEq, VariantCount)]
+#[derive(Debug, Display, Clone, Copy, PartialEq, Eq, VariantCount, Hash)]
 pub enum TokenKind {
     LeftParen,
     RightParen,
@@ -49,7 +49,7 @@ pub enum TokenKind {
     Error,
     Eof,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Token<'src> {
     pub kind: TokenKind,
     pub lexeme: &'src str,
