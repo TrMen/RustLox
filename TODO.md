@@ -8,6 +8,17 @@
 - Error recovery probably doesn't quite work. E.g. when I define a variable but run out of constants to put the name
   - The variable name is probably still defined afterwards, since I only synchronize after the end of a statement
   - And the name declaration happens before that
-- Variables don't persist in repl, since I made everyrthing single-pass, oops
-- Assignment isn't implemented yet
 - Line information for runtime errors is off by one
+ ```
+ let a = 2;
+
+{
+    let b = 3;
+    print c;
+    print b;
+    print a;
+}
+print b;
+print 2;
+``` This program only reports undefined global b, not the undefined local c;
+- Implement single-assignment variables with 'let' or 'const'

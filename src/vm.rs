@@ -165,8 +165,8 @@ impl VM {
                 // TODO: This duplicated binary_op, because otherwise we run into borrowing issues with the closure
                 // But it shouldn't need to do that.
 
-                let rhs = self.pop(); // This order is intended
-                let lhs = self.pop(); // If lhs is evaluated first, it will be below rhs on a stack
+                let rhs = self.pop_stack(); // This order is intended
+                let lhs = self.pop_stack(); // If lhs is evaluated first, it will be below rhs on a stack
 
                 let val = match Value::add(lhs, rhs, &mut self.interned_strings, &mut self.objects)
                 {
@@ -195,15 +195,15 @@ impl VM {
             OpCode::False => self.stack.push(Value::Bool(false)),
             OpCode::Nil => self.stack.push(Value::Nil),
             OpCode::Equal => {
-                let rhs = self.pop(); // This order is intended
-                let lhs = self.pop(); // If lhs is evaluated first, it will be below rhs on a stack
+                let rhs = self.pop_stack(); // This order is intended
+                let lhs = self.pop_stack(); // If lhs is evaluated first, it will be below rhs on a stack
 
                 let compared = Value::Bool(lhs == rhs);
 
                 self.stack.push(compared);
             }
             OpCode::Print => {
-                let val = self.pop();
+                let val = self.pop_stack();
 
                 println!("{}", val.stringify(&self.interned_strings));
             }
@@ -215,7 +215,7 @@ impl VM {
 
                 let existing = self
                     .globals
-                    .insert(identifier.to_string(), self.peek().clone());
+                    .insert(identifier.to_string(), self.top_of_stack().clone());
 
                 if existing.is_some() {
                     return Err(RuntimeError {
@@ -225,7 +225,7 @@ impl VM {
 
                 // Don't pop the value till after insertion into globals,
                 // to prevent GC cleanup while we're inserting
-                self.pop();
+                self.pop_stack();
             }
             OpCode::GetGlobal => {
                 let identifier = self.read_constant().as_str(&self.interned_strings);
@@ -243,7 +243,7 @@ impl VM {
 
                 // Note: Don't pop the value off the stack in case the assignment is
                 // nested in a bigger expression.
-                let assigned_val = self.peek().clone();
+                let assigned_val = self.top_of_stack().clone();
 
                 if let Some(val) = self.globals.get_mut(identifier) {
                     *val = assigned_val;
@@ -252,6 +252,24 @@ impl VM {
                         msg: format!("Undefined variable {identifier}"),
                     });
                 }
+            }
+            OpCode::GetLocal => {
+                let stack_offset_of_val = self.read_arg();
+
+                // Access operations look for the val on top of the stack, so we need
+                // to copy it, even though it exists futher down.
+                // This is fundamental to the stack-based VM design.
+                self.stack
+                    .push(self.stack[stack_offset_of_val as usize].clone());
+            }
+            OpCode::SetLocal => {
+                let stack_offset_of_val = self.read_arg();
+
+                let assigned_val = self.top_of_stack();
+
+                // Assignment is an expression, and every expression produces a value,
+                // so we don't pop the assigned value
+                self.stack[stack_offset_of_val as usize] = assigned_val.clone();
             }
         }
 
@@ -284,8 +302,8 @@ impl VM {
         &mut self,
         op: impl FnOnce(Value, Value) -> Result<Value, &'static str>,
     ) -> Result<(), RuntimeError> {
-        let rhs = self.pop(); // This order is intended
-        let lhs = self.pop(); // If lhs is evaluated first, it will be below rhs on a stack
+        let rhs = self.pop_stack(); // This order is intended
+        let lhs = self.pop_stack(); // If lhs is evaluated first, it will be below rhs on a stack
 
         let val = match op(lhs, rhs) {
             Err(msg) => {
@@ -307,19 +325,29 @@ impl VM {
         Ok(())
     }
 
-    pub fn pop(&mut self) -> Value {
+    pub fn pop_stack(&mut self) -> Value {
         self.stack.pop().expect("Stack empty")
     }
 
-    pub fn peek(&self) -> &Value {
+    pub fn top_of_stack(&self) -> &Value {
         self.stack.last().unwrap()
     }
 
+    // TODO: Split these nicely to see which methods read the stack and which
+    // read the code.
     fn read_constant(&mut self) -> Value {
         let constant = self.chunk.constant_at_code_index(self.ip);
         self.ip += 2; // Skip low and high of constant index
 
         constant.clone() // TODO: No clone needed
+    }
+
+    // TODO: It's too easy to skip these and get something out of chunk without incrementing ip
+    fn read_arg(&mut self) -> u16 {
+        let constant = self.chunk.arg_at_code_index(self.ip);
+        self.ip += 2; // Skip low and high of constant index
+
+        constant
     }
 }
 
