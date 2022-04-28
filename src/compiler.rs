@@ -8,7 +8,15 @@ use crate::{
     value::Value,
 };
 
-type ParseFn<'a> = Option<fn(&mut Compiler<'a>)>;
+// Used to pass extra information to the specific ParseFn
+#[derive(PartialEq)]
+pub enum ExtraInformation {
+    None,
+    CanAssign,
+    CannotAssign,
+}
+
+type ParseFn<'a> = Option<fn(&mut Compiler<'a>, &ExtraInformation)>;
 // The lifetime is only inferred when the fn is actually used with a specific compiler
 // object. So this lifetime doesn't depend on the life of the function ptr (always static),
 // but instead on the actual used object. So this works.
@@ -170,14 +178,20 @@ impl<'src> Compiler<'src> {
         let prefix_rule = self.get_rule(self.parser.previous.kind).prefix;
 
         if prefix_rule.is_none() {
-            self.parser.error_at_previous("Expect expression");
+            self.parser.report_error_at_previous("Expect expression");
             return;
         }
+
+        let can_assign = if prec.precedence <= Precedence::Assign {
+            ExtraInformation::CanAssign
+        } else {
+            ExtraInformation::CannotAssign
+        };
 
         // Compiles the rest of the prefix expression. Note that simple expressions just compile to
         // themselves. E.g. numbers -> number() So there must always be something here, or it's
         // a syntax error.
-        prefix_rule.unwrap()(self);
+        prefix_rule.unwrap()(self, &can_assign);
 
         // Then compile all following tokens which can be an infix rule (e.g. the already-compiled)
         // operand can be an argument for it. Compile only those of higher precedence.
@@ -191,7 +205,15 @@ impl<'src> Compiler<'src> {
             // Note: infix_rules call back into this function, so after this, everything of higher
             // precedence is already compiled (e.g. everything on the rhs that the original
             // lhs is an operand for)
-            infix_rule(self);
+            infix_rule(self, &ExtraInformation::None);
+        }
+
+        // If the lhs has lower precedence than assignment, it's a compound expression like a * b
+        // and assignment to it is a syntax error.
+        if can_assign == ExtraInformation::CanAssign && self.parser.match_advance(TokenKind::Equal)
+        {
+            self.parser
+                .report_error_at_previous("Invalid assignment target.");
         }
     }
 
@@ -282,7 +304,7 @@ impl<'src> Compiler<'src> {
         self.parse_precedence(Prec::new(Precedence::Assign));
     }
 
-    fn literal(&mut self) {
+    fn literal(&mut self, _: &ExtraInformation) {
         match self.parser.previous.kind {
             TokenKind::False => self.emit_op(OpCodeWithoutArg::False),
             TokenKind::True => self.emit_op(OpCodeWithoutArg::True),
@@ -291,7 +313,7 @@ impl<'src> Compiler<'src> {
         }
     }
 
-    fn string(&mut self) {
+    fn string(&mut self, _: &ExtraInformation) {
         let string_obj = Object::from_str(self.parser.previous.lexeme, &mut self.strings);
 
         // Note: String deliberately not added to ObjectList because constants
@@ -299,7 +321,7 @@ impl<'src> Compiler<'src> {
         self.emit_constant(Value::Obj(string_obj));
     }
 
-    fn number(&mut self) {
+    fn number(&mut self, _: &ExtraInformation) {
         let float = &self
             .parser
             .previous
@@ -310,15 +332,16 @@ impl<'src> Compiler<'src> {
         self.emit_constant(Value::Double(*float));
     }
 
-    fn variable(&mut self) {
-        self.named_variable(self.parser.previous.lexeme);
+    fn variable(&mut self, extra_info: &ExtraInformation) {
+        let can_assign = *extra_info == ExtraInformation::CanAssign;
+        self.named_variable(self.parser.previous.lexeme, can_assign);
     }
 
-    fn named_variable(&mut self, name: &str) {
+    fn named_variable(&mut self, name: &str, can_assign: bool) {
         // GetGlobal has a constant index as arg
         let constant_index = self.add_identifier_constant(name);
 
-        if self.parser.match_advance(TokenKind::Equal) {
+        if can_assign && self.parser.match_advance(TokenKind::Equal) {
             self.expression();
             self.emit_op_with_arg(OpCodeWithArg::SetGlobal, constant_index);
         } else {
@@ -326,13 +349,13 @@ impl<'src> Compiler<'src> {
         }
     }
 
-    fn grouping(&mut self) {
+    fn grouping(&mut self, _: &ExtraInformation) {
         self.expression();
         self.parser
             .consume(TokenKind::RightParen, "Expect ')' after expression.");
     }
 
-    fn unary(&mut self) {
+    fn unary(&mut self, _: &ExtraInformation) {
         let operator_kind = self.parser.previous.kind; // Must be grabbed before operand is parsed
 
         // Compile the operand
@@ -349,7 +372,7 @@ impl<'src> Compiler<'src> {
         }
     }
 
-    fn binary(&mut self) {
+    fn binary(&mut self, _: &ExtraInformation) {
         // When this is called, the entire lhs of the expr was already compiled and the operator consumed
         // -> previous token is the operator
         let operator_kind = self.parser.previous.kind;
