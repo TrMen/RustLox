@@ -152,7 +152,7 @@ impl<'src> Compiler<'src> {
         let constant_index = match self.chunk.add_constant(value) {
             Ok(constant_index) => constant_index,
             Err(err_message) => {
-                self.parser.error_at_previous(err_message);
+                self.parser.report_error_at_previous(err_message);
                 u16::MAX // Not sure this is a good idea, but should be fine since I reported error
             }
         };
@@ -207,7 +207,7 @@ impl<'src> Compiler<'src> {
         {
             Ok(constant_index) => constant_index,
             Err(msg) => {
-                self.parser.error_at_current(msg);
+                self.parser.report_error_at_current(msg);
                 ConstantIndex::MAX
             }
         }

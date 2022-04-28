@@ -10,3 +10,4 @@
   - And the name declaration happens before that
 - Variables don't persist in repl, since I made everyrthing single-pass, oops
 - Assignment isn't implemented yet
+- Line information for runtime errors is off by one

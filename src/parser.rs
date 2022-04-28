@@ -25,7 +25,7 @@ impl<'src> Parser<'src> {
         }
     }
 
-    pub fn error_at_current(&mut self, msg: &str) {
+    pub fn report_error_at_current(&mut self, msg: &str) {
         if self.panic_mode {
             return;
         }
@@ -36,7 +36,7 @@ impl<'src> Parser<'src> {
         self.panic_mode = true;
     }
 
-    pub fn error_at_previous(&mut self, msg: &str) {
+    pub fn report_error_at_previous(&mut self, msg: &str) {
         if self.panic_mode {
             return;
         }
@@ -80,7 +80,7 @@ impl<'src> Parser<'src> {
         self.previous = self.current.clone();
 
         while let TokenKind::Error = self.next_token_from_scanner().kind {
-            self.error_at_current("");
+            self.report_error_at_current("");
         }
     }
 
@@ -101,15 +101,16 @@ impl<'src> Parser<'src> {
                 | TokenKind::Return => return,
                 _ => (),
             }
+
+            self.advance();
         }
-        self.advance();
     }
 
     pub fn consume(&mut self, kind: TokenKind, err_message: &str) {
         if self.check(kind) {
             self.advance();
         } else {
-            self.error_at_current(err_message);
+            self.report_error_at_current(err_message);
         }
     }
 

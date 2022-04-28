@@ -30,17 +30,12 @@ pub fn disassemble_instruction(chunk: &Chunk, code_index: CodeIndex, content: Op
     print!("{:4} ", line);
 
     match content {
-        OpCode::Constant => constant_instruction(chunk, "OP_CONSTANT", code_index + 1),
-        OpCode::DefineGlobal => constant_instruction(chunk, "OP_DEFINE_GLOBAL", code_index + 1),
-        OpCode::GetGlobal => constant_instruction(chunk, "OP_GET_GLOBAL", code_index + 1),
-        op => println!("{}", op),
+        op @ (OpCode::Constant | OpCode::DefineGlobal | OpCode::GetGlobal | OpCode::SetGlobal) => {
+            println!(
+                "{op:-16} '{:?}'",
+                chunk.constant_at_code_index(code_index + 1),
+            );
+        }
+        op => println!("{op}"),
     }
-}
-
-fn constant_instruction(chunk: &Chunk, name: &str, code_index: CodeIndex) {
-    println!(
-        "{:-16} '{:?}'",
-        name,
-        chunk.constant_at_code_index(code_index),
-    );
 }
