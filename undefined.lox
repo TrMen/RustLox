@@ -1,0 +1,9 @@
+
+{
+    // Should only error at runtime, since this might be a function definition
+    // and def of the global after lexical usage is valid.
+    print xx;
+}
+
+let xx = 29;
+

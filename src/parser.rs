@@ -89,6 +89,7 @@ impl<'src> Parser<'src> {
                 TokenKind::Class
                 | TokenKind::Fun
                 | TokenKind::Var
+                | TokenKind::Let
                 | TokenKind::If
                 | TokenKind::While
                 | TokenKind::Print

@@ -13,7 +13,6 @@ pub type CodeIndex = usize;
 pub enum OpCode {
     GetGlobal,
     DefineGlobal,
-    SetGlobal,
     GetLocal,
     SetLocal,
     Pop,
@@ -45,7 +44,6 @@ impl From<OpCodeWithArg> for OpCode {
         match op {
             OpCodeWithArg::DefineGlobal => Self::DefineGlobal,
             OpCodeWithArg::GetGlobal => Self::GetGlobal,
-            OpCodeWithArg::SetGlobal => Self::SetGlobal,
             OpCodeWithArg::Constant => Self::Constant,
             OpCodeWithArg::SetLocal => Self::SetLocal,
             OpCodeWithArg::GetLocal => Self::GetLocal,
@@ -76,16 +74,17 @@ impl From<OpCodeWithoutArg> for OpCode {
 }
 
 // The argument is always 2 bytes
+#[derive(PartialEq)]
 #[repr(u8)]
 pub enum OpCodeWithArg {
     GetGlobal,
     DefineGlobal,
-    SetGlobal,
     SetLocal,
     GetLocal, // Note: No DefineLocal, since that's all done at comptime
     Constant,
 }
 
+#[derive(PartialEq)]
 #[repr(u8)]
 pub enum OpCodeWithoutArg {
     Pop,

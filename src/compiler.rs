@@ -13,13 +13,20 @@ use crate::{
 
 // Used to pass extra information to the specific ParseFn
 #[derive(PartialEq)]
-pub enum ExtraInformation {
+pub enum ExtraExprParseInfo {
     None,
     CanAssign,
     CannotAssign,
 }
 
-type ParseFn<'a> = Option<fn(&mut Compiler<'a>, &ExtraInformation)>;
+#[derive(PartialEq, Clone, Copy, Debug)]
+pub enum VariableModifiers {
+    SingleAssignment,
+    Mutable,
+    // Can add other modifiers here
+}
+
+type ParseFn<'a> = Option<fn(&mut Compiler<'a>, &ExtraExprParseInfo)>;
 // The lifetime is only inferred when the fn is actually used with a specific compiler
 // object. So this lifetime doesn't depend on the life of the function ptr (always static),
 // but instead on the actual used object. So this works.
@@ -44,50 +51,51 @@ fn rule<'a>(prefix: ParseFn<'a>, infix: ParseFn<'a>, prec: Prec) -> ParseRule<'a
 
 fn init_rules<'a>() -> [ParseRule<'a>; TokenKind::VARIANT_COUNT] {
     [
-        rule(Some(Compiler::grouping), None, Prec::new(Precedence::None)),
-        rule(None, None, Prec::new(Precedence::None)),
-        rule(None, None, Prec::new(Precedence::None)),
-        rule(None, None, Prec::new(Precedence::None)),
-        rule(None, None, Prec::new(Precedence::None)),
-        rule(None, None, Prec::new(Precedence::None)),
+        rule(Some(Compiler::grouping), None, Prec::new(Precedence::None)), // (
+        rule(None, None, Prec::new(Precedence::None)),                     // )
+        rule(None, None, Prec::new(Precedence::None)),                     // {
+        rule(None, None, Prec::new(Precedence::None)),                     // }
+        rule(None, None, Prec::new(Precedence::None)),                     // ,
+        rule(None, None, Prec::new(Precedence::None)),                     //.
         rule(
             Some(Compiler::unary),
             Some(Compiler::binary),
             Prec::new(Precedence::Term),
-        ),
-        rule(None, Some(Compiler::binary), Prec::new(Precedence::Term)),
-        rule(None, None, Prec::new(Precedence::None)),
-        rule(None, Some(Compiler::binary), Prec::new(Precedence::Factor)),
-        rule(None, Some(Compiler::binary), Prec::new(Precedence::Factor)),
-        rule(Some(Compiler::unary), None, Prec::new(Precedence::None)),
-        rule(None, Some(Compiler::binary), Prec::new(Precedence::Equal)), // !=
-        rule(None, None, Prec::new(Precedence::None)),                    // =
-        rule(None, Some(Compiler::binary), Prec::new(Precedence::Comp)),  // ==
-        rule(None, Some(Compiler::binary), Prec::new(Precedence::Comp)),  // >
-        rule(None, Some(Compiler::binary), Prec::new(Precedence::Comp)),  // >=
-        rule(None, Some(Compiler::binary), Prec::new(Precedence::Comp)),  // <
-        rule(None, Some(Compiler::binary), Prec::new(Precedence::Comp)),  // <=
+        ), // -
+        rule(None, Some(Compiler::binary), Prec::new(Precedence::Term)),   // +
+        rule(None, None, Prec::new(Precedence::None)),                     //;
+        rule(None, Some(Compiler::binary), Prec::new(Precedence::Factor)), // /
+        rule(None, Some(Compiler::binary), Prec::new(Precedence::Factor)), // *
+        rule(Some(Compiler::unary), None, Prec::new(Precedence::None)),    // !
+        rule(None, Some(Compiler::binary), Prec::new(Precedence::Equal)),  // !=
+        rule(None, None, Prec::new(Precedence::None)),                     // =
+        rule(None, Some(Compiler::binary), Prec::new(Precedence::Comp)),   // ==
+        rule(None, Some(Compiler::binary), Prec::new(Precedence::Comp)),   // >
+        rule(None, Some(Compiler::binary), Prec::new(Precedence::Comp)),   // >=
+        rule(None, Some(Compiler::binary), Prec::new(Precedence::Comp)),   // <
+        rule(None, Some(Compiler::binary), Prec::new(Precedence::Comp)),   // <=
         rule(Some(Compiler::variable), None, Prec::new(Precedence::None)), // Identifier
-        rule(Some(Compiler::string), None, Prec::new(Precedence::None)),  // String
-        rule(Some(Compiler::number), None, Prec::new(Precedence::None)),  // Number
-        rule(None, None, Prec::new(Precedence::None)),
-        rule(None, None, Prec::new(Precedence::None)),
-        rule(None, None, Prec::new(Precedence::None)),
-        rule(Some(Compiler::literal), None, Prec::new(Precedence::None)),
-        rule(None, None, Prec::new(Precedence::None)),
-        rule(None, None, Prec::new(Precedence::None)),
-        rule(None, None, Prec::new(Precedence::None)),
-        rule(Some(Compiler::literal), None, Prec::new(Precedence::None)),
-        rule(None, None, Prec::new(Precedence::None)),
-        rule(None, None, Prec::new(Precedence::None)),
-        rule(None, None, Prec::new(Precedence::None)),
-        rule(None, None, Prec::new(Precedence::None)),
-        rule(None, None, Prec::new(Precedence::None)),
-        rule(Some(Compiler::literal), None, Prec::new(Precedence::None)),
-        rule(None, None, Prec::new(Precedence::None)),
-        rule(None, None, Prec::new(Precedence::None)),
-        rule(None, None, Prec::new(Precedence::None)),
-        rule(None, None, Prec::new(Precedence::None)),
+        rule(Some(Compiler::string), None, Prec::new(Precedence::None)),   // String
+        rule(Some(Compiler::number), None, Prec::new(Precedence::None)),   // Number
+        rule(None, None, Prec::new(Precedence::None)),                     //and
+        rule(None, None, Prec::new(Precedence::None)),                     //class
+        rule(None, None, Prec::new(Precedence::None)),                     //else
+        rule(Some(Compiler::literal), None, Prec::new(Precedence::None)),  // false
+        rule(None, None, Prec::new(Precedence::None)),                     // for
+        rule(None, None, Prec::new(Precedence::None)),                     //fun
+        rule(None, None, Prec::new(Precedence::None)),                     // if
+        rule(Some(Compiler::literal), None, Prec::new(Precedence::None)),  // nil
+        rule(None, None, Prec::new(Precedence::None)),                     // or
+        rule(None, None, Prec::new(Precedence::None)),                     // print
+        rule(None, None, Prec::new(Precedence::None)),                     //return
+        rule(None, None, Prec::new(Precedence::None)),                     // super
+        rule(None, None, Prec::new(Precedence::None)),                     //this
+        rule(Some(Compiler::literal), None, Prec::new(Precedence::None)),  //true
+        rule(None, None, Prec::new(Precedence::None)),                     // var
+        rule(None, None, Prec::new(Precedence::None)),                     // let
+        rule(None, None, Prec::new(Precedence::None)),                     // while
+        rule(None, None, Prec::new(Precedence::None)),                     // error
+        rule(None, None, Prec::new(Precedence::None)),                     // EOF
     ]
 }
 
@@ -100,7 +108,7 @@ pub struct CompiletimeError {
     pub msg: String,
 }
 
-#[derive(Eq)]
+#[derive(Eq, Debug, Clone)]
 enum UsedGlobal<'src> {
     // Index in interned_strings IndexableStringSet
     Defined(&'src str),
@@ -129,9 +137,11 @@ impl<'src> Hash for UsedGlobal<'src> {
 }
 
 // TODO: I don't like that I store the whole token by value so much. But it's prolly fine
+#[derive(Debug)]
 struct Local<'src> {
     token: Token<'src>,
     depth: usize,
+    modifiers: VariableModifiers,
 }
 
 struct ScopeInformation<'src> {
@@ -150,7 +160,11 @@ impl<'src> ScopeInformation<'src> {
     const UNINITIALIZED_DEPTH: usize = Self::MAX_DEPTH + 1;
     const MAX_LOCAL_COUNT: usize = LocalIndex::MAX as usize + 1;
 
-    fn add_local(&mut self, token: Token<'src>) -> Result<(), CompiletimeError> {
+    fn add_local(
+        &mut self,
+        token: Token<'src>,
+        modifiers: VariableModifiers,
+    ) -> Result<(), CompiletimeError> {
         // Note: UNDEFINED_DEPTH must be greater than MAX_DEPTH
 
         if self.locals.len() >= Self::MAX_LOCAL_COUNT {
@@ -176,6 +190,7 @@ impl<'src> ScopeInformation<'src> {
             // To prevent self-referential definition, split definition into two phases
             // and initialize depth at the end of the defintion
             depth: Self::UNINITIALIZED_DEPTH,
+            modifiers,
         });
 
         Ok(())
@@ -201,7 +216,7 @@ impl<'src> ScopeInformation<'src> {
         &self,
         identifier: &'src str,
         parser: &mut Parser<'src>, // TODO: This shouldn't be needed, just properly propagate errors
-    ) -> Option<LocalIndex> {
+    ) -> Option<(LocalIndex, VariableModifiers)> {
         self.locals
             .iter()
             .rev()
@@ -214,7 +229,8 @@ impl<'src> ScopeInformation<'src> {
                 }
                 is_equal
             })
-            .map(|pos| pos as LocalIndex) // Save because max locals limit is enforced in add_local
+            .map(|pos| (pos as LocalIndex, self.get_local(pos).modifiers))
+        // Save because max locals limit is enforced in add_local
     }
 
     fn locals_at_current_depth(&self) -> impl Iterator<Item = &Local<'src>> {
@@ -225,12 +241,20 @@ impl<'src> ScopeInformation<'src> {
             .take_while(move |local| local.depth >= self.scope_depth) // >= to capture UNDEFINED_DEPTH
     }
 
+    fn get_local(&self, index: usize) -> &Local<'src> {
+        &self.locals[self.locals.len() - (index + 1)]
+    }
+
     fn is_global(&self) -> bool {
         self.scope_depth == 0
     }
 
     fn mark_last_local_initialized(&mut self) {
         self.locals.last_mut().unwrap().depth = self.scope_depth;
+    }
+
+    fn is_local_initialized(&self, index: LocalIndex) -> bool {
+        self.get_local(index as usize).depth != Self::UNINITIALIZED_DEPTH
     }
 }
 
@@ -336,18 +360,30 @@ impl<'src> Compiler<'src> {
     }
 
     // Returns the index in the constant table that holds the variable name
-    fn parse_variable(&mut self, err_msg: &str) -> (&'src str, ConstantIndex) {
+    fn parse_variable(
+        &mut self,
+        err_msg: &str,
+        modifiers: VariableModifiers,
+    ) -> (&'src str, ConstantIndex) {
         self.parser.consume(TokenKind::Identifier, err_msg);
 
         if self.scope_information.is_global() {
-            (
-                self.parser.previous.lexeme,
-                self.add_identifier_constant(self.parser.previous.lexeme),
-            )
+            if modifiers == VariableModifiers::Mutable {
+                self.parser.report_error_at_previous(&format!(
+                    "Global variables must be immutable. Try 'let {} = ...;'",
+                    self.parser.previous.lexeme
+                ));
+                (self.parser.previous.lexeme, ConstantIndex::MAX)
+            } else {
+                (
+                    self.parser.previous.lexeme,
+                    self.add_identifier_constant(self.parser.previous.lexeme),
+                )
+            }
         } else {
             // TODO: This is just declare_variable in the book and always called (where it just returns for globals)
             // I might get bitten by the differences.
-            self.declare_local_variable();
+            self.declare_local_variable(modifiers);
             (
                 "Local identifiers aren't read at runtime",
                 ConstantIndex::MAX,
@@ -355,10 +391,13 @@ impl<'src> Compiler<'src> {
         }
     }
 
-    fn declare_local_variable(&mut self) {
+    fn declare_local_variable(&mut self, modifiers: VariableModifiers) {
         let identifier_token = &self.parser.previous;
 
-        if let Err(e) = self.scope_information.add_local(identifier_token.clone()) {
+        if let Err(e) = self
+            .scope_information
+            .add_local(identifier_token.clone(), modifiers)
+        {
             // TODO: Is this enough error handling? This likely has false-positive follow up errors if
             // we check that locals are actually defined at comptime. But this is unlikely to be a big deal.
             self.parser.report_error_at_previous(&e.msg);
@@ -375,9 +414,24 @@ impl<'src> Compiler<'src> {
             return;
         }
 
-        self.accessed_globals
-            .insert(UsedGlobal::Defined(identifier));
-        self.emit_op_with_arg(OpCodeWithArg::DefineGlobal, global);
+        let global_usage = UsedGlobal::Defined(identifier);
+
+        if let Some(UsedGlobal::Defined(_)) = self.accessed_globals.get(&global_usage) {
+            self.parser.report_error_at_previous(&format!(
+                "Redefinition of global variable '{identifier}'"
+            ));
+        } else {
+            // TODO: Super hacky because of bad Eq impl that compares Defined(iden) == Accessed(iden)
+
+            let existed = !self.accessed_globals.insert(global_usage.clone());
+
+            if existed {
+                self.accessed_globals.remove(&global_usage);
+                self.accessed_globals.insert(global_usage);
+            }
+
+            self.emit_op_with_arg(OpCodeWithArg::DefineGlobal, global);
+        }
     }
 
     // --------------------------------Parse Helper Methods--------------------------------
@@ -397,9 +451,9 @@ impl<'src> Compiler<'src> {
         }
 
         let can_assign = if prec.precedence <= Precedence::Assign {
-            ExtraInformation::CanAssign
+            ExtraExprParseInfo::CanAssign
         } else {
-            ExtraInformation::CannotAssign
+            ExtraExprParseInfo::CannotAssign
         };
 
         // Compiles the rest of the prefix expression. Note that simple expressions just compile to
@@ -419,12 +473,13 @@ impl<'src> Compiler<'src> {
             // Note: infix_rules call back into this function, so after this, everything of higher
             // precedence is already compiled (e.g. everything on the rhs that the original
             // lhs is an operand for)
-            infix_rule(self, &ExtraInformation::None);
+            infix_rule(self, &ExtraExprParseInfo::None);
         }
 
         // If the lhs has lower precedence than assignment, it's a compound expression like a * b
         // and assignment to it is a syntax error.
-        if can_assign == ExtraInformation::CanAssign && self.parser.match_advance(TokenKind::Equal)
+        if can_assign == ExtraExprParseInfo::CanAssign
+            && self.parser.match_advance(TokenKind::Equal)
         {
             self.parser
                 .report_error_at_previous("Invalid assignment target.");
@@ -470,7 +525,9 @@ impl<'src> Compiler<'src> {
 
     fn declaration(&mut self) {
         if self.parser.match_advance(TokenKind::Var) {
-            self.var_declaration();
+            self.var_declaration(VariableModifiers::Mutable);
+        } else if self.parser.match_advance(TokenKind::Let) {
+            self.var_declaration(VariableModifiers::SingleAssignment);
         } else {
             self.statement();
         }
@@ -480,12 +537,16 @@ impl<'src> Compiler<'src> {
         }
     }
 
-    fn var_declaration(&mut self) {
-        let (identifier, global) = self.parse_variable("Expect variable name.");
+    fn var_declaration(&mut self, modifiers: VariableModifiers) {
+        let (identifier, global) = self.parse_variable("Expect variable name.", modifiers);
 
         if self.parser.match_advance(TokenKind::Equal) {
             self.expression();
         } else {
+            if modifiers == VariableModifiers::SingleAssignment {
+                self.parser.report_error_at_previous(&format!("Defining single-assignment variable '{identifier}' without value. It's value would be an alias to 'nil' forever."));
+                return;
+            }
             self.emit_op(OpCodeWithoutArg::Nil);
         }
 
@@ -537,7 +598,7 @@ impl<'src> Compiler<'src> {
         self.parse_precedence(Prec::new(Precedence::Assign));
     }
 
-    fn literal(&mut self, _: &ExtraInformation) {
+    fn literal(&mut self, _: &ExtraExprParseInfo) {
         match self.parser.previous.kind {
             TokenKind::False => self.emit_op(OpCodeWithoutArg::False),
             TokenKind::True => self.emit_op(OpCodeWithoutArg::True),
@@ -546,7 +607,7 @@ impl<'src> Compiler<'src> {
         }
     }
 
-    fn string(&mut self, _: &ExtraInformation) {
+    fn string(&mut self, _: &ExtraExprParseInfo) {
         let string_obj = Object::from_str(self.parser.previous.lexeme, &mut self.interned_strings);
 
         // Note: String deliberately not added to ObjectList because constants
@@ -554,7 +615,7 @@ impl<'src> Compiler<'src> {
         self.emit_constant(Value::Obj(string_obj));
     }
 
-    fn number(&mut self, _: &ExtraInformation) {
+    fn number(&mut self, _: &ExtraExprParseInfo) {
         let float = &self
             .parser
             .previous
@@ -565,52 +626,67 @@ impl<'src> Compiler<'src> {
         self.emit_constant(Value::Double(*float));
     }
 
-    fn variable(&mut self, extra_info: &ExtraInformation) {
-        let can_assign = *extra_info == ExtraInformation::CanAssign;
-        self.named_variable(self.parser.previous.lexeme, can_assign);
+    fn variable(&mut self, extra_info: &ExtraExprParseInfo) {
+        self.named_variable(self.parser.previous.lexeme, extra_info);
     }
 
-    fn named_variable(&mut self, identifier: &'src str, can_assign: bool) {
+    fn named_variable(&mut self, identifier: &'src str, extra_info: &ExtraExprParseInfo) {
         // TODO: A duplicating constant is added every time a variable is accessed.
         // This can be avoided.
+
+        // TODO: This logic between locals and globals is a bit too convoluted.
+        // Also, since globals are single-assigment now,
+        // they can prolly use a simpler data structure than a hash table
 
         let (get_op, set_op, arg) = match self
             .scope_information
             .resolve_local(identifier, &mut self.parser)
         {
-            Some(local_index) => (
-                OpCodeWithArg::GetLocal,
-                OpCodeWithArg::SetLocal,
-                local_index,
-            ),
+            Some((local_index, modifiers)) => {
+                let set_op = if modifiers == VariableModifiers::Mutable
+                    || (modifiers == VariableModifiers::SingleAssignment
+                        && !self.scope_information.is_local_initialized(local_index))
+                {
+                    Some(OpCodeWithArg::SetLocal)
+                } else {
+                    None
+                };
+
+                (OpCodeWithArg::GetLocal, set_op, local_index)
+            }
             None => {
                 let global_constant_index = self.add_identifier_constant(identifier);
 
                 self.accessed_globals
                     .get_or_insert(UsedGlobal::Accessed(self.parser.previous.clone()));
-                (
-                    OpCodeWithArg::GetGlobal,
-                    OpCodeWithArg::SetGlobal,
-                    global_constant_index,
-                )
+                (OpCodeWithArg::GetGlobal, None, global_constant_index)
             }
         };
 
-        if can_assign && self.parser.match_advance(TokenKind::Equal) {
-            self.expression();
-            self.emit_op_with_arg(set_op, arg);
+        let is_assignment = *extra_info == ExtraExprParseInfo::CanAssign
+            && self.parser.match_advance(TokenKind::Equal);
+
+        if is_assignment {
+            if let Some(set_op) = set_op {
+                self.expression();
+                self.emit_op_with_arg(set_op, arg);
+            } else {
+                // TODO: Global x = 20; double reports error. This is annoying to fix because one error is reported at end of compilation.
+                self.parser
+                    .report_error_at_previous(&format!("Trying to reassign single-assignment variable '{identifier}'. Variables declared with 'let' are single-assignment."));
+            }
         } else {
             self.emit_op_with_arg(get_op, arg);
         }
     }
 
-    fn grouping(&mut self, _: &ExtraInformation) {
+    fn grouping(&mut self, _: &ExtraExprParseInfo) {
         self.expression();
         self.parser
             .consume(TokenKind::RightParen, "Expect ')' after expression.");
     }
 
-    fn unary(&mut self, _: &ExtraInformation) {
+    fn unary(&mut self, _: &ExtraExprParseInfo) {
         let operator_kind = self.parser.previous.kind; // Must be grabbed before operand is parsed
 
         // Compile the operand
@@ -627,7 +703,7 @@ impl<'src> Compiler<'src> {
         }
     }
 
-    fn binary(&mut self, _: &ExtraInformation) {
+    fn binary(&mut self, _: &ExtraExprParseInfo) {
         // When this is called, the entire lhs of the expr was already compiled and the operator consumed
         // -> previous token is the operator
         let operator_kind = self.parser.previous.kind;

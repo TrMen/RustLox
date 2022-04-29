@@ -1,0 +1,13 @@
+var beverage = "cafe au lait";
+var breakfast = "beignets";
+var test_dedup = "cafe au lait"; // String literal shouldn't be present twice in interned strings
+
+print breakfast;
+
+breakfast = "Beignets with " + beverage; // Expression precedence between rhs and = is correct
+
+print breakfast;
+
+breakfast + "should_be_unassignable" = "boom";
+
+print undefined_variable; // Should be a compile-time error

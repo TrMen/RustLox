@@ -213,15 +213,8 @@ impl VM {
             OpCode::DefineGlobal => {
                 let identifier = self.read_constant().as_str(&self.interned_strings);
 
-                let existing = self
-                    .globals
+                self.globals
                     .insert(identifier.to_string(), self.top_of_stack().clone());
-
-                if existing.is_some() {
-                    return Err(RuntimeError {
-                        msg: format!("Redefiniton of global variable '{identifier}'"),
-                    });
-                }
 
                 // Don't pop the value till after insertion into globals,
                 // to prevent GC cleanup while we're inserting
@@ -232,21 +225,6 @@ impl VM {
 
                 if let Some(val) = self.globals.get(identifier) {
                     self.stack.push(val.clone());
-                } else {
-                    return Err(RuntimeError {
-                        msg: format!("Undefined variable {identifier}"),
-                    });
-                }
-            }
-            OpCode::SetGlobal => {
-                let identifier = self.read_constant().as_str(&self.interned_strings);
-
-                // Note: Don't pop the value off the stack in case the assignment is
-                // nested in a bigger expression.
-                let assigned_val = self.top_of_stack().clone();
-
-                if let Some(val) = self.globals.get_mut(identifier) {
-                    *val = assigned_val;
                 } else {
                     return Err(RuntimeError {
                         msg: format!("Undefined variable {identifier}"),
