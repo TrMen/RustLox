@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     assembler,
-    chunk::{Chunk, CodeIndex, OpCode},
+    chunk::{Chunk, CodeIndex, OpCode, TwoByteArg},
     compiler::{Compiler, CompiletimeError},
     indexable_string_set::IndexableStringSet,
     object::ObjectList,
@@ -249,6 +249,32 @@ impl VM {
                 // so we don't pop the assigned value
                 self.stack[stack_offset_of_val as usize] = assigned_val.clone();
             }
+            OpCode::JumpIfFalse => {
+                let offset = self.read_arg();
+
+                if !self.top_of_stack().is_truthy() {
+                    self.ip += offset as usize;
+                }
+                // Note: Condition value is popped off stack for all jump instructions
+                // in separate POP instructions emitted by the compiler
+            }
+            OpCode::JumpForward => {
+                let offset = self.read_arg();
+
+                self.ip += offset as usize;
+            }
+            OpCode::JumpBackward => {
+                let offset = self.read_arg();
+
+                self.ip -= offset as usize;
+            }
+            OpCode::JumpIfTrue => {
+                let offset = self.read_arg();
+
+                if self.top_of_stack().is_truthy() {
+                    self.ip += offset as usize;
+                }
+            }
         }
 
         Ok(())
@@ -321,7 +347,8 @@ impl VM {
     }
 
     // TODO: It's too easy to skip these and get something out of chunk without incrementing ip
-    fn read_arg(&mut self) -> u16 {
+    // -> The ip should be part of the chunk
+    fn read_arg(&mut self) -> TwoByteArg {
         let constant = self.chunk.arg_at_code_index(self.ip);
         self.ip += 2; // Skip low and high of constant index
 

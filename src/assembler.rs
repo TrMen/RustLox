@@ -14,6 +14,10 @@ pub fn disassemble(chunk: &Chunk, name: &str) {
             || instruction == OpCode::GetGlobal
             || instruction == OpCode::SetLocal
             || instruction == OpCode::GetLocal
+            || instruction == OpCode::JumpIfFalse
+            || instruction == OpCode::JumpForward
+            || instruction == OpCode::JumpBackward
+            || instruction == OpCode::JumpIfTrue
         {
             iter.next(); // Skip the following two constant indices (low and high)
             iter.next();
@@ -40,7 +44,12 @@ pub fn disassemble_instruction(chunk: &Chunk, code_index: CodeIndex, content: Op
                 chunk.constant_at_code_index(code_index + 1),
             );
         }
-        op @ (OpCode::SetLocal | OpCode::GetLocal) => {
+        op @ (OpCode::SetLocal
+        | OpCode::GetLocal
+        | OpCode::JumpIfFalse
+        | OpCode::JumpForward
+        | OpCode::JumpBackward
+        | OpCode::JumpIfTrue) => {
             // Names of locals are never stored in the chunk, so we can't print them.
             // So at least print the stack offset of the local
             println!("{op:-16} '{:?}'", chunk.arg_at_code_index(code_index + 1),);

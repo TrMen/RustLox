@@ -4,10 +4,16 @@ use crate::value::Value;
 use num_traits::FromPrimitive;
 use strum_macros::Display;
 
-// TODO: Document difference between these types
+// TODO: Make these strong types
+pub type TwoByteArg = u16;
+// Count of where the value of a local variable is on the stack
+// At runtime, the value of the local variable is at that many locals away on the stack.
+pub type LocalIndex = u16;
 pub type ConstantIndex = u16;
 pub type CodeIndex = usize;
+pub type JumpOffset = u16;
 
+// Comments documenting usage in OpcodeWithArg and OpCodeWithoutArg
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Display, FromPrimitive, ToPrimitive, PartialEq)]
 pub enum OpCode {
@@ -19,7 +25,7 @@ pub enum OpCode {
     Print,
     Return,
     Constant,
-    Nil, // Nil, True, False are optimizations for avoiding constant lookup in those cases
+    Nil,
     True,
     False,
     Equal,
@@ -31,6 +37,10 @@ pub enum OpCode {
     Multiply,
     Divide,
     Not,
+    JumpIfFalse,
+    JumpForward,
+    JumpBackward,
+    JumpIfTrue,
 }
 
 impl OpCode {
@@ -47,6 +57,10 @@ impl From<OpCodeWithArg> for OpCode {
             OpCodeWithArg::Constant => Self::Constant,
             OpCodeWithArg::SetLocal => Self::SetLocal,
             OpCodeWithArg::GetLocal => Self::GetLocal,
+            OpCodeWithArg::JumpIfFalse => Self::JumpIfFalse,
+            OpCodeWithArg::JumpForward => Self::JumpForward,
+            OpCodeWithArg::JumpBackward => Self::JumpBackward,
+            OpCodeWithArg::JumpIfTrue => Self::JumpIfTrue,
         }
     }
 }
@@ -82,6 +96,10 @@ pub enum OpCodeWithArg {
     SetLocal,
     GetLocal, // Note: No DefineLocal, since that's all done at comptime
     Constant,
+    JumpIfTrue,
+    JumpIfFalse, // Argument is how much to offset the ip by if the condition (top of stack) is false
+    JumpForward,
+    JumpBackward, // Used for loops
 }
 
 #[derive(PartialEq)]
@@ -90,7 +108,7 @@ pub enum OpCodeWithoutArg {
     Pop,
     Print,
     Return,
-    Nil,
+    Nil, // Nil, True, False are optimizations for avoiding constant lookup in those cases
     True,
     False,
     Equal,
@@ -137,9 +155,9 @@ impl Chunk {
         self.lines.last_mut().unwrap().count += 1;
     }
 
-    // Add the ConstantIndex as two bytes in a row to the code.
+    // Add the arg as two bytes in a row to the code.
     // Does not add anything to the constant table
-    pub fn append_constant_index(&mut self, val: ConstantIndex, line: i32) {
+    pub fn append_arg(&mut self, val: TwoByteArg, line: i32) {
         let [high, low] = val.to_be_bytes();
 
         self.code.push(high);
@@ -177,12 +195,17 @@ impl Chunk {
         }
     }
 
-    // TODO: "arg" always refers to two bytes. If that's ever not true, make these names different
-    pub fn arg_at_code_index(&self, code_index: CodeIndex) -> u16 {
+    pub fn arg_at_code_index(&self, code_index: CodeIndex) -> TwoByteArg {
         let high = self.code[code_index];
-        let low = self.code[(code_index + 1)];
+        let low = self.code[code_index + 1];
 
-        u16::from_be_bytes([high, low])
+        TwoByteArg::from_be_bytes([high, low])
+    }
+
+    pub fn change_arg_at_code_index(&mut self, code_index: CodeIndex, value: TwoByteArg) {
+        let [high, low] = TwoByteArg::to_be_bytes(value);
+        self.code[code_index] = high;
+        self.code[code_index + 1] = low;
     }
 
     pub fn constant_at_code_index(&self, code_index: CodeIndex) -> &Value {
@@ -191,11 +214,14 @@ impl Chunk {
         &self.constants[constant_index as usize]
     }
 
+    pub fn code_bytes_len(&self) -> usize {
+        self.code.len()
+    }
+
     pub fn instruction_at(&self, code_index: CodeIndex) -> Option<OpCode> {
-        Some(
-            OpCode::from_u8(*self.code.get(code_index)?)
-                .expect("Content cannot be interpreted as an instruction"),
-        )
+        self.code.get(code_index).map(|op| {
+            OpCode::from_u8(*op).expect("Content cannot be interpreted as an instruction")
+        })
     }
 }
 
@@ -226,7 +252,7 @@ mod tests {
         let mut chunk = Chunk::new();
 
         for line in 0..10 {
-            chunk.append_constant_index(0, line);
+            chunk.append_arg(0, line);
         }
 
         for line in 0..10 {
@@ -265,10 +291,10 @@ mod tests {
         assert_eq!(second_constant_index, 1);
 
         chunk.append_op(OpCode::Constant, 0); // code-index 0
-        chunk.append_constant_index(first_constant_index, 0); // code-index 1 + 2
+        chunk.append_arg(first_constant_index, 0); // code-index 1 + 2
 
         chunk.append_op(OpCode::Constant, 0); // code-index 3
-        chunk.append_constant_index(second_constant_index, 0); // code-index 4+5
+        chunk.append_arg(second_constant_index, 0); // code-index 4+5
 
         assert_eq!(chunk.code[1], 0);
         assert_eq!(chunk.code[2], 0);
