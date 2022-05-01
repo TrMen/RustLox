@@ -29,6 +29,7 @@ impl<'src> Parser<'src> {
         self.report_error_at(&self.previous.clone(), msg);
     }
 
+    // TODO: Make a hint system. Then I can report errors, or alternatively with hints
     pub fn report_error_at_previous(&mut self, msg: &str) {
         // Cloning token here is fine since it's just for error reporting
         self.report_error_at(&self.previous.clone(), msg);

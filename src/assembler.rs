@@ -25,6 +25,7 @@ pub fn disassemble(chunk: &Chunk, name: &str) {
 
         disassemble_instruction(chunk, code_index, instruction);
     }
+    println!();
 }
 
 pub fn disassemble_instruction(chunk: &Chunk, code_index: CodeIndex, content: OpCode) {

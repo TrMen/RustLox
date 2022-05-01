@@ -11,7 +11,7 @@ use crate::{
     precedence::{Prec, Precedence},
     scanner::{Token, TokenKind},
     value::Value,
-    vm::InterpretationMode,
+    CliArgs,
 };
 
 // Used to pass extra information to the specific ParseFn
@@ -51,6 +51,9 @@ fn rule<'a>(prefix: ParseFn<'a>, infix: ParseFn<'a>, prec: Prec) -> ParseRule<'a
         prec,
     }
 }
+
+#[must_use]
+struct MustCloseScope {}
 
 fn init_rules<'a>() -> [ParseRule<'a>; TokenKind::VARIANT_COUNT] {
     [
@@ -264,14 +267,14 @@ pub struct Compiler<'src> {
     objects: ObjectList,
     interned_strings: IndexableStringSet,
     accessed_globals: HashSet<UsedGlobal<'src>>,
-    mode: InterpretationMode,
+    args: CliArgs,
     scope_information: ScopeInformation<'src>,
 }
 
 impl<'src> Compiler<'src> {
     pub fn compile(
         source: &str,
-        mode: InterpretationMode,
+        args: CliArgs,
     ) -> Result<(Chunk, ObjectList, IndexableStringSet), CompiletimeError> {
         let mut compiler = Compiler {
             rules: init_rules(),
@@ -280,7 +283,7 @@ impl<'src> Compiler<'src> {
             objects: ObjectList::new(),
             interned_strings: IndexableStringSet::new(),
             accessed_globals: HashSet::new(),
-            mode,
+            args,
             scope_information: ScopeInformation {
                 locals: Vec::new(),
                 scope_depth: 0,
@@ -302,7 +305,7 @@ impl<'src> Compiler<'src> {
         self.emit_op(OpCodeWithoutArg::Return);
 
         // Functions might be defined separately from use in repl, so don't report undefined globals
-        if self.mode != InterpretationMode::Repl {
+        if self.args.file.is_none() {
             for token in self.accessed_globals.iter().filter_map(|e| match e {
                 UsedGlobal::Accessed(token) => Some(token),
                 _ => None,
@@ -537,17 +540,19 @@ impl<'src> Compiler<'src> {
         }
     }
 
-    fn begin_scope(&mut self) {
+    fn begin_scope(&mut self) -> MustCloseScope {
         if self.scope_information.scope_depth >= ScopeInformation::MAX_DEPTH {
             self.parser
                 .report_error_at_previous("Too many nested scopes.");
-            return;
+            return MustCloseScope {};
         }
 
         self.scope_information.scope_depth += 1;
+
+        MustCloseScope {}
     }
 
-    fn end_scope(&mut self) {
+    fn end_scope(&mut self, _: MustCloseScope) {
         for _ in 0..self.scope_information.pop_scope() {
             // Pop value from the stack at runtime
             self.emit_op(OpCodeWithoutArg::Pop);
@@ -917,7 +922,7 @@ mod tests {
     #[test]
     fn compile_number() {
         let (chunk, _, _) =
-            Compiler::compile("1;", InterpretationMode::Repl).expect("Compilation failed");
+            Compiler::compile("1;", CliArgs::test(true)).expect("Compilation failed");
 
         assert_eq!(OpCode::from_u8(chunk.code[0]).unwrap(), OpCode::Constant);
         assert_eq!(chunk.constant_at_code_index(1), &Value::Double(1.0));
@@ -926,7 +931,7 @@ mod tests {
     #[test]
     fn compile_add() {
         let (chunk, _, _) =
-            Compiler::compile("1+2;", InterpretationMode::Repl).expect("Compilation failed");
+            Compiler::compile("1+2;", CliArgs::test(true)).expect("Compilation failed");
 
         assert_eq!(OpCode::from_u8(chunk.code[0]).unwrap(), OpCode::Constant);
         assert_eq!(chunk.constant_at_code_index(1), &Value::Double(1.0));

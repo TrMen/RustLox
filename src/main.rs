@@ -21,12 +21,33 @@ use std::{
     process::exit,
 };
 
-use vm::{InterpretationError, InterpretationMode};
+use vm::InterpretationError;
 
 use crate::vm::VM;
 
-fn repl() -> Result<(), io::Error> {
-    let mut vm = VM::new_without_input(InterpretationMode::Repl);
+use clap::Parser;
+
+/// Simple program to greet a person
+#[derive(Parser, Debug, Clone)]
+pub struct CliArgs {
+    /// Print code after compiling
+    #[clap(short, long)]
+    print_code: bool,
+
+    file: Option<String>,
+}
+
+impl CliArgs {
+    pub fn test(file: bool) -> Self {
+        Self {
+            print_code: false,
+            file: if file { Some("Test".to_string()) } else { None },
+        }
+    }
+}
+
+fn repl(args: CliArgs) -> Result<(), io::Error> {
+    let mut vm = VM::new_without_input(args);
 
     loop {
         print!("> ");
@@ -48,8 +69,8 @@ fn repl() -> Result<(), io::Error> {
     }
 }
 
-fn run_file(filename: String) -> Result<(), io::Error> {
-    let mut vm = VM::new_without_input(InterpretationMode::File(filename.clone()));
+fn run_file(filename: String, args: CliArgs) -> Result<(), io::Error> {
+    let mut vm = VM::new_without_input(args);
 
     match vm.compile_and_interpret(&std::fs::read_to_string(filename)?) {
         Err(InterpretationError::Compiletime(e)) => {
@@ -67,19 +88,19 @@ fn run_file(filename: String) -> Result<(), io::Error> {
 }
 
 fn main() {
-    let arg_count = std::env::args().count();
-    if arg_count == 1 {
-        if let Err(e) = repl() {
-            println!("Encountered error running repl: {}", e);
-            exit(42);
-        }
-    } else if arg_count == 2 {
-        if let Err(e) = run_file(std::env::args().nth(1).unwrap()) {
+    let mut args = CliArgs::parse();
+
+    if cfg!(debug_assertions) {
+        args.print_code = true;
+    }
+
+    if let Some(file) = &args.file {
+        if let Err(e) = run_file(file.clone(), args) {
             println!("Encountered error running file: {}", e);
             exit(42);
         }
-    } else {
-        println!("Usage: Lox [path]");
-        exit(64);
+    } else if let Err(e) = repl(args) {
+        println!("Encountered error running repl: {}", e);
+        exit(42);
     }
 }
