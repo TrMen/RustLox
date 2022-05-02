@@ -128,6 +128,16 @@ pub struct LineInformation {
     pub count: usize,
 }
 
+struct CodeEmissionError<'a> {
+    msg: &'a str,
+}
+
+impl<'a> CodeEmissionError<'a> {
+    fn new(msg: &'a str) -> Self {
+        Self { msg }
+    }
+}
+
 // Contains opcodes, constants and their associated source code lines
 #[derive(Debug)]
 pub struct Chunk {
@@ -186,12 +196,29 @@ impl Chunk {
     }
 
     // Add a constant to the constant table without adding it's index to the code
-    pub fn add_constant(&mut self, val: Value) -> Result<ConstantIndex, &'static str> {
+    pub fn add_constant(
+        &mut self,
+        val: Value,
+    ) -> Result<ConstantIndex, CodeEmissionError<'static>> {
         if self.constants.len() >= ConstantIndex::MAX as usize {
-            Err("Too many constants in one chunk")
+            Err(CodeEmissionError::new("Too many constants in one chunk"))
         } else {
             self.constants.push(val);
             Ok((self.constants.len() - 1) as ConstantIndex)
+        }
+    }
+
+    // TODO: This belongs in chunks
+    fn add_identifier_constant(&mut self, name: &str) -> ConstantIndex {
+        match self.chunk.add_constant(Value::Obj(Object::from_str(
+            name,
+            &mut self.interned_strings,
+        ))) {
+            Ok(constant_index) => constant_index,
+            Err(msg) => {
+                self.parser.report_error_at_current(msg);
+                ConstantIndex::MAX
+            }
         }
     }
 

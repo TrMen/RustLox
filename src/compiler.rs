@@ -22,14 +22,7 @@ pub enum ExtraExprParseInfo {
     CannotAssign,
 }
 
-#[derive(PartialEq, Clone, Copy, Debug)]
-pub enum VariableModifiers {
-    SingleAssignment,
-    Mutable,
-    // Can add other modifiers here
-}
-
-type ParseFn<'a> = Option<fn(&mut Compiler<'a>, &ExtraExprParseInfo)>;
+type ParseFn<'a> = Option<fn(&mut WillBecomeParser<'a>, &ExtraExprParseInfo)>;
 // The lifetime is only inferred when the fn is actually used with a specific compiler
 // object. So this lifetime doesn't depend on the life of the function ptr (always static),
 // but instead on the actual used object. So this works.
@@ -57,51 +50,123 @@ struct MustCloseScope {}
 
 fn init_rules<'a>() -> [ParseRule<'a>; TokenKind::VARIANT_COUNT] {
     [
-        rule(Some(Compiler::grouping), None, Prec::new(Precedence::None)), // (
-        rule(None, None, Prec::new(Precedence::None)),                     // )
-        rule(None, None, Prec::new(Precedence::None)),                     // {
-        rule(None, None, Prec::new(Precedence::None)),                     // }
-        rule(None, None, Prec::new(Precedence::None)),                     // ,
-        rule(None, None, Prec::new(Precedence::None)),                     //.
         rule(
-            Some(Compiler::unary),
-            Some(Compiler::binary),
+            Some(WillBecomeParser::grouping),
+            None,
+            Prec::new(Precedence::None),
+        ), // (
+        rule(None, None, Prec::new(Precedence::None)), // )
+        rule(None, None, Prec::new(Precedence::None)), // {
+        rule(None, None, Prec::new(Precedence::None)), // }
+        rule(None, None, Prec::new(Precedence::None)), // ,
+        rule(None, None, Prec::new(Precedence::None)), //.
+        rule(
+            Some(WillBecomeParser::unary),
+            Some(WillBecomeParser::binary),
             Prec::new(Precedence::Term),
         ), // -
-        rule(None, Some(Compiler::binary), Prec::new(Precedence::Term)),   // +
-        rule(None, None, Prec::new(Precedence::None)),                     //;
-        rule(None, Some(Compiler::binary), Prec::new(Precedence::Factor)), // /
-        rule(None, Some(Compiler::binary), Prec::new(Precedence::Factor)), // *
-        rule(Some(Compiler::unary), None, Prec::new(Precedence::None)),    // !
-        rule(None, Some(Compiler::binary), Prec::new(Precedence::Equal)),  // !=
-        rule(None, None, Prec::new(Precedence::None)),                     // =
-        rule(None, Some(Compiler::binary), Prec::new(Precedence::Comp)),   // ==
-        rule(None, Some(Compiler::binary), Prec::new(Precedence::Comp)),   // >
-        rule(None, Some(Compiler::binary), Prec::new(Precedence::Comp)),   // >=
-        rule(None, Some(Compiler::binary), Prec::new(Precedence::Comp)),   // <
-        rule(None, Some(Compiler::binary), Prec::new(Precedence::Comp)),   // <=
-        rule(Some(Compiler::variable), None, Prec::new(Precedence::None)), // Identifier
-        rule(Some(Compiler::string), None, Prec::new(Precedence::None)),   // String
-        rule(Some(Compiler::number), None, Prec::new(Precedence::None)),   // Number
-        rule(None, Some(Compiler::and), Prec::new(Precedence::And)),       // and
-        rule(None, None, Prec::new(Precedence::None)),                     //class
-        rule(None, None, Prec::new(Precedence::None)),                     //else
-        rule(Some(Compiler::literal), None, Prec::new(Precedence::None)),  // false
-        rule(None, None, Prec::new(Precedence::None)),                     // for
-        rule(None, None, Prec::new(Precedence::None)),                     //fun
-        rule(None, None, Prec::new(Precedence::None)),                     // if
-        rule(Some(Compiler::literal), None, Prec::new(Precedence::None)),  // nil
-        rule(None, Some(Compiler::or), Prec::new(Precedence::Or)),         // or
-        rule(None, None, Prec::new(Precedence::None)),                     // print
-        rule(None, None, Prec::new(Precedence::None)),                     //return
-        rule(None, None, Prec::new(Precedence::None)),                     // super
-        rule(None, None, Prec::new(Precedence::None)),                     //this
-        rule(Some(Compiler::literal), None, Prec::new(Precedence::None)),  //true
-        rule(None, None, Prec::new(Precedence::None)),                     // var
-        rule(None, None, Prec::new(Precedence::None)),                     // let
-        rule(None, None, Prec::new(Precedence::None)),                     // while
-        rule(None, None, Prec::new(Precedence::None)),                     // error
-        rule(None, None, Prec::new(Precedence::None)),                     // EOF
+        rule(
+            None,
+            Some(WillBecomeParser::binary),
+            Prec::new(Precedence::Term),
+        ), // +
+        rule(None, None, Prec::new(Precedence::None)), //;
+        rule(
+            None,
+            Some(WillBecomeParser::binary),
+            Prec::new(Precedence::Factor),
+        ), // /
+        rule(
+            None,
+            Some(WillBecomeParser::binary),
+            Prec::new(Precedence::Factor),
+        ), // *
+        rule(
+            Some(WillBecomeParser::unary),
+            None,
+            Prec::new(Precedence::None),
+        ), // !
+        rule(
+            None,
+            Some(WillBecomeParser::binary),
+            Prec::new(Precedence::Equal),
+        ), // !=
+        rule(None, None, Prec::new(Precedence::None)), // =
+        rule(
+            None,
+            Some(WillBecomeParser::binary),
+            Prec::new(Precedence::Comp),
+        ), // ==
+        rule(
+            None,
+            Some(WillBecomeParser::binary),
+            Prec::new(Precedence::Comp),
+        ), // >
+        rule(
+            None,
+            Some(WillBecomeParser::binary),
+            Prec::new(Precedence::Comp),
+        ), // >=
+        rule(
+            None,
+            Some(WillBecomeParser::binary),
+            Prec::new(Precedence::Comp),
+        ), // <
+        rule(
+            None,
+            Some(WillBecomeParser::binary),
+            Prec::new(Precedence::Comp),
+        ), // <=
+        rule(
+            Some(WillBecomeParser::variable),
+            None,
+            Prec::new(Precedence::None),
+        ), // Identifier
+        rule(
+            Some(WillBecomeParser::string),
+            None,
+            Prec::new(Precedence::None),
+        ), // String
+        rule(
+            Some(WillBecomeParser::number),
+            None,
+            Prec::new(Precedence::None),
+        ), // Number
+        rule(
+            None,
+            Some(WillBecomeParser::and),
+            Prec::new(Precedence::And),
+        ), // and
+        rule(None, None, Prec::new(Precedence::None)), //class
+        rule(None, None, Prec::new(Precedence::None)), //else
+        rule(
+            Some(WillBecomeParser::literal),
+            None,
+            Prec::new(Precedence::None),
+        ), // false
+        rule(None, None, Prec::new(Precedence::None)), // for
+        rule(None, None, Prec::new(Precedence::None)), //fun
+        rule(None, None, Prec::new(Precedence::None)), // if
+        rule(
+            Some(WillBecomeParser::literal),
+            None,
+            Prec::new(Precedence::None),
+        ), // nil
+        rule(None, Some(WillBecomeParser::or), Prec::new(Precedence::Or)), // or
+        rule(None, None, Prec::new(Precedence::None)), // print
+        rule(None, None, Prec::new(Precedence::None)), //return
+        rule(None, None, Prec::new(Precedence::None)), // super
+        rule(None, None, Prec::new(Precedence::None)), //this
+        rule(
+            Some(WillBecomeParser::literal),
+            None,
+            Prec::new(Precedence::None),
+        ), //true
+        rule(None, None, Prec::new(Precedence::None)), // var
+        rule(None, None, Prec::new(Precedence::None)), // let
+        rule(None, None, Prec::new(Precedence::None)), // while
+        rule(None, None, Prec::new(Precedence::None)), // error
+        rule(None, None, Prec::new(Precedence::None)), // EOF
     ]
 }
 
@@ -114,6 +179,7 @@ pub struct CompiletimeError {
     pub msg: String,
 }
 
+// TODO: What to do with this thing?
 #[derive(Eq, Debug, Clone)]
 enum UsedGlobal<'src> {
     // Index in interned_strings IndexableStringSet
@@ -142,152 +208,27 @@ impl<'src> Hash for UsedGlobal<'src> {
     }
 }
 
-// TODO: I don't like that I store the whole token by value so much. But it's prolly fine
-#[derive(Debug)]
-struct Local<'src> {
-    token: Token<'src>,
-    depth: usize,
-    modifiers: VariableModifiers,
-}
-
-struct ScopeInformation<'src> {
-    // Locals are appended to the array, so the locals with deepest scope
-    // are always at the end
-    locals: Vec<Local<'src>>,
-    scope_depth: usize,
-}
-
-impl<'src> ScopeInformation<'src> {
-    const MAX_DEPTH: usize = usize::MAX / 2;
-    const UNINITIALIZED_DEPTH: usize = Self::MAX_DEPTH + 1;
-    const MAX_LOCAL_COUNT: usize = LocalIndex::MAX as usize + 1;
-
-    fn add_local(
-        &mut self,
-        token: Token<'src>,
-        modifiers: VariableModifiers,
-    ) -> Result<(), CompiletimeError> {
-        // Note: UNDEFINED_DEPTH must be greater than MAX_DEPTH
-
-        if self.locals.len() >= Self::MAX_LOCAL_COUNT {
-            return Err(CompiletimeError {
-                msg: format!(
-                    "Too many local variables defined in scope. Max {}.",
-                    Self::MAX_LOCAL_COUNT
-                ),
-            });
-        }
-
-        if self
-            .locals_at_current_depth()
-            .any(|local| local.token.lexeme == token.lexeme)
-        {
-            return Err(CompiletimeError {
-                msg: format!("Redefinition of local variable '{}'", token.lexeme),
-            });
-        }
-
-        self.locals.push(Local {
-            token,
-            // To prevent self-referential definition, split definition into two phases
-            // and initialize depth at the end of the defintion
-            depth: Self::UNINITIALIZED_DEPTH,
-            modifiers,
-        });
-
-        Ok(())
-    }
-
-    fn pop_scope(&mut self) -> usize {
-        self.scope_depth -= 1;
-
-        let popped_locals = self
-            .locals
-            .iter()
-            .rev()
-            .take_while(|local| local.depth > self.scope_depth)
-            .count();
-
-        // TODO: Indices correct?
-        self.locals.truncate(self.locals.len() - popped_locals);
-
-        popped_locals
-    }
-
-    fn resolve_local(
-        &self,
-        identifier: &'src str,
-        parser: &mut Parser<'src>, // TODO: This shouldn't be needed, just properly propagate errors
-    ) -> Option<(LocalIndex, VariableModifiers)> {
-        self.locals
-            .iter()
-            .rev()
-            .position(|local| {
-                let is_equal = local.token.lexeme == identifier;
-                if is_equal && local.depth == Self::UNINITIALIZED_DEPTH {
-                    parser.report_error_at_previous(
-                        "Can't read local variable in it's own initializer.",
-                    );
-                }
-                is_equal
-            })
-            .map(|pos| (pos as LocalIndex, self.get_local(pos).modifiers))
-        // Save because max locals limit is enforced in add_local
-    }
-
-    fn locals_at_current_depth(&self) -> impl Iterator<Item = &Local<'src>> {
-        self.locals
-            .iter()
-            .rev()
-            // Take all in undefined or deeper scope
-            .take_while(move |local| local.depth >= self.scope_depth) // >= to capture UNDEFINED_DEPTH
-    }
-
-    fn get_local(&self, index: usize) -> &Local<'src> {
-        &self.locals[self.locals.len() - (index + 1)]
-    }
-
-    fn is_global(&self) -> bool {
-        self.scope_depth == 0
-    }
-
-    fn mark_last_local_initialized(&mut self) {
-        self.locals.last_mut().unwrap().depth = self.scope_depth;
-    }
-
-    fn is_local_initialized(&self, index: LocalIndex) -> bool {
-        self.get_local(index as usize).depth != Self::UNINITIALIZED_DEPTH
-    }
-}
-
-pub struct Compiler<'src> {
+pub struct WillBecomeParser<'src> {
     rules: [ParseRule<'src>; TokenKind::VARIANT_COUNT],
-    parser: Parser<'src>,
-    chunk: Chunk,
+    parser: Parser<'src>, // TODO: Becomes err handler
     objects: ObjectList,
     interned_strings: IndexableStringSet,
     accessed_globals: HashSet<UsedGlobal<'src>>,
     args: CliArgs,
-    scope_information: ScopeInformation<'src>,
 }
 
-impl<'src> Compiler<'src> {
+impl<'src> WillBecomeParser<'src> {
     pub fn compile(
         source: &str,
         args: CliArgs,
     ) -> Result<(Chunk, ObjectList, IndexableStringSet), CompiletimeError> {
-        let mut compiler = Compiler {
+        let mut compiler = WillBecomeParser {
             rules: init_rules(),
             parser: Parser::new(source),
-            chunk: Chunk::new(),
             objects: ObjectList::new(),
             interned_strings: IndexableStringSet::new(),
             accessed_globals: HashSet::new(),
             args,
-            scope_information: ScopeInformation {
-                locals: Vec::new(),
-                scope_depth: 0,
-            },
         };
 
         compiler.parser.advance();
@@ -328,54 +269,6 @@ impl<'src> Compiler<'src> {
 
     // --------------------------------Bytecode Emission methods--------------------------------
 
-    // TODO: More cleanly separate the methods according to what they do. It's all very muddy.
-    // Parse, codegen, helpers
-
-    fn emit_op(&mut self, op: OpCodeWithoutArg) {
-        let line = self.parser.previous.line;
-        self.chunk.append_op(op.into(), line);
-    }
-
-    fn emit_ops(&mut self, first: OpCodeWithoutArg, second: OpCodeWithoutArg) {
-        self.emit_op(first);
-        self.emit_op(second);
-    }
-
-    fn emit_op_with_arg(&mut self, op: OpCodeWithArg, arg: TwoByteArg) {
-        let line = self.parser.previous.line;
-        self.chunk.append_op(op.into(), line);
-
-        let line = self.parser.previous.line;
-        self.chunk.append_arg(arg, line);
-    }
-
-    fn emit_constant(&mut self, value: Value) {
-        let constant_index = match self.chunk.add_constant(value) {
-            Ok(constant_index) => constant_index,
-            Err(err_message) => {
-                self.parser.report_error_at_previous(err_message);
-                u16::MAX // Not sure this is a good idea, but should be fine since I reported error
-            }
-        };
-
-        self.emit_op_with_arg(OpCodeWithArg::Constant, constant_index);
-    }
-
-    fn emit_jmp_backwards(&mut self, loop_start: CodeIndex) {
-        // emit_jmp_with_placeholder and backpatch_jmp combined, because the offset is swapped
-        // and we don't need to backpatch.
-
-        // +3 because op itself wasn't emitted yet, unlike in backpatch_jmp
-        let distance_backwards = self.chunk.code_bytes_len() - loop_start + 3;
-
-        if let Ok(distance) = distance_backwards.try_into() {
-            self.emit_op_with_arg(OpCodeWithArg::JumpBackward, distance);
-        } else {
-            self.parser
-                .report_error_at_previous("Too much code to jump over.");
-        }
-    }
-
     // Returns the index in the constant table that holds the variable name
     fn parse_variable(
         &mut self,
@@ -384,6 +277,7 @@ impl<'src> Compiler<'src> {
     ) -> (&'src str, TwoByteArg) {
         self.parser.consume(TokenKind::Identifier, err_msg);
 
+        // TODO: This should be in the new Compiler struct, but the identifer parsing shouldn't be.
         if self.scope_information.is_global() {
             if modifiers == VariableModifiers::Mutable {
                 self.parser.report_error_at_previous(&format!(
@@ -408,71 +302,9 @@ impl<'src> Compiler<'src> {
         }
     }
 
-    fn declare_local_variable(&mut self, modifiers: VariableModifiers) {
-        let identifier_token = &self.parser.previous;
-
-        if let Err(e) = self
-            .scope_information
-            .add_local(identifier_token.clone(), modifiers)
-        {
-            // TODO: Is this enough error handling? This likely has false-positive follow up errors if
-            // we check that locals are actually defined at comptime. But this is unlikely to be a big deal.
-            self.parser.report_error_at_previous(&e.msg);
-        }
-    }
-
-    fn define_variable(&mut self, identifier: &'src str, global: ConstantIndex) {
-        if !self.scope_information.is_global() {
-            self.scope_information.mark_last_local_initialized();
-
-            // There is no code to define local variables at runtime, the VM already
-            // executed the initializer and the result is a temporary at the top of stack stack.
-            // So the temp simply becomes the local variable, that's it. Scoping is implicit.
-            return;
-        }
-
-        let global_usage = UsedGlobal::Defined(identifier);
-
-        if let Some(UsedGlobal::Defined(_)) = self.accessed_globals.get(&global_usage) {
-            self.parser.report_error_at_previous(&format!(
-                "Redefinition of global variable '{identifier}'"
-            ));
-        } else {
-            // TODO: Super hacky because of bad Eq impl that compares Defined(iden) == Accessed(iden)
-
-            let existed = !self.accessed_globals.insert(global_usage.clone());
-
-            if existed {
-                self.accessed_globals.remove(&global_usage);
-                self.accessed_globals.insert(global_usage);
-            }
-
-            self.emit_op_with_arg(OpCodeWithArg::DefineGlobal, global);
-        }
-    }
-
-    #[must_use]
-    fn emit_jmp_with_placeholder(&mut self, op: OpCodeWithArg) -> CodeIndex {
-        self.emit_op_with_arg(op, JumpOffset::MAX);
-
-        self.chunk.code_bytes_len() - 2
-    }
-
-    fn backpatch_jmp(&mut self, jmp_instr_index: CodeIndex) {
-        let jump_distance = self.chunk.code_bytes_len() - (jmp_instr_index + 2);
-
-        if let Ok(distance) = jump_distance.try_into() {
-            self.chunk
-                .change_arg_at_code_index(jmp_instr_index as usize, distance);
-        } else {
-            self.parser
-                .report_error_at_previous("Too much code to jump over.");
-        }
-    }
-
     // --------------------------------Parse Helper Methods--------------------------------
 
-    fn parse_expr_with_precedence(&mut self, prec: Prec) {
+    fn parse_precedence(&mut self, prec: Prec) {
         // At this point, our previus token is some kind of operator (in a general sense).
         // E.g. '-', '+', '('. For this, there could be defined prefix and/or infix functions
 
@@ -524,39 +356,6 @@ impl<'src> Compiler<'src> {
 
     fn get_rule(&self, kind: TokenKind) -> ParseRule<'src> {
         self.rules[kind as usize].clone()
-    }
-
-    // TODO: This belongs in chunks
-    fn add_identifier_constant(&mut self, name: &str) -> ConstantIndex {
-        match self.chunk.add_constant(Value::Obj(Object::from_str(
-            name,
-            &mut self.interned_strings,
-        ))) {
-            Ok(constant_index) => constant_index,
-            Err(msg) => {
-                self.parser.report_error_at_current(msg);
-                ConstantIndex::MAX
-            }
-        }
-    }
-
-    fn begin_scope(&mut self) -> MustCloseScope {
-        if self.scope_information.scope_depth >= ScopeInformation::MAX_DEPTH {
-            self.parser
-                .report_error_at_previous("Too many nested scopes.");
-            return MustCloseScope {};
-        }
-
-        self.scope_information.scope_depth += 1;
-
-        MustCloseScope {}
-    }
-
-    fn end_scope(&mut self, _: MustCloseScope) {
-        for _ in 0..self.scope_information.pop_scope() {
-            // Pop value from the stack at runtime
-            self.emit_op(OpCodeWithoutArg::Pop);
-        }
     }
 
     // --------------------------------Production methods--------------------------------
@@ -753,7 +552,7 @@ impl<'src> Compiler<'src> {
     }
 
     fn expression(&mut self) {
-        self.parse_expr_with_precedence(Prec::new(Precedence::Assign));
+        self.parse_precedence(Prec::new(Precedence::Assign));
     }
 
     fn literal(&mut self, _: &ExtraExprParseInfo) {
@@ -848,7 +647,7 @@ impl<'src> Compiler<'src> {
         let operator_kind = self.parser.previous.kind; // Must be grabbed before operand is parsed
 
         // Compile the operand
-        self.parse_expr_with_precedence(Prec::new(Precedence::Unary));
+        self.parse_precedence(Prec::new(Precedence::Unary));
 
         // Emit the operator instruction (remember: stack-based -> operator after operands)
         match operator_kind {
@@ -870,7 +669,7 @@ impl<'src> Compiler<'src> {
 
         // Parse rhs operand.
         // One higher precedence level, because we want left-associativity: 1+2+3 == (1+2)+3
-        self.parse_expr_with_precedence(rule.prec.next());
+        self.parse_precedence(rule.prec.next());
 
         // After operands, emit bytecode for operator
         match operator_kind {
@@ -907,7 +706,7 @@ impl<'src> Compiler<'src> {
         self.emit_op(OpCodeWithoutArg::Pop);
 
         // Rhs
-        self.parse_expr_with_precedence(Prec::new(Precedence::And));
+        self.parse_precedence(Prec::new(Precedence::And));
 
         self.backpatch_jmp(end_jmp);
     }
@@ -921,7 +720,7 @@ impl<'src> Compiler<'src> {
         self.emit_op(OpCodeWithoutArg::Pop);
 
         // Rhs
-        self.parse_expr_with_precedence(Prec::new(Precedence::Or));
+        self.parse_precedence(Prec::new(Precedence::Or));
 
         self.backpatch_jmp(end_jmp);
     }
@@ -989,7 +788,7 @@ mod tests {
     #[test]
     fn compile_number() {
         let (chunk, _, _) =
-            Compiler::compile("1;", CliArgs::test(true)).expect("Compilation failed");
+            WillBecomeParser::compile("1;", CliArgs::test(true)).expect("Compilation failed");
 
         assert_eq!(OpCode::from_u8(chunk.code[0]).unwrap(), OpCode::Constant);
         assert_eq!(chunk.constant_at_code_index(1), &Value::Double(1.0));
@@ -998,7 +797,7 @@ mod tests {
     #[test]
     fn compile_add() {
         let (chunk, _, _) =
-            Compiler::compile("1+2;", CliArgs::test(true)).expect("Compilation failed");
+            WillBecomeParser::compile("1+2;", CliArgs::test(true)).expect("Compilation failed");
 
         assert_eq!(OpCode::from_u8(chunk.code[0]).unwrap(), OpCode::Constant);
         assert_eq!(chunk.constant_at_code_index(1), &Value::Double(1.0));
