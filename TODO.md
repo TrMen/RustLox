@@ -4,4 +4,3 @@
 - Implement optimization for constant strings borrowing the src code
   - `String` becomes `enum (String, &'a str)`
   - If we wanted to make the code compile to a binary, it could easily borrow the constant section then
-- Deduplicate strings

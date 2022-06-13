@@ -238,9 +238,6 @@ impl<'src> Compiler<'src> {
     }
 
     fn string(&mut self) {
-        // TODO: This can be omitted. Instead of having constants in the object list, they could just be
-        // saved in the constant array. That way, we guarantee that they aren't mutated, and save some
-        // heap allocations.
         let string_object = self
             .objects
             .add_string(self.parser.previous.lexeme.to_string());
