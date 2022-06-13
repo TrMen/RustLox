@@ -1,10 +1,12 @@
 use std::str::Chars;
+extern crate variant_count;
 
 use peekmore::{PeekMore, PeekMoreIterator};
 
 use strum_macros::Display;
+use variant_count::VariantCount;
 
-#[derive(Display, Clone, Copy, PartialEq)]
+#[derive(Debug, Display, Clone, Copy, PartialEq, VariantCount)]
 pub enum TokenKind {
     LeftParen,
     RightParen,
@@ -48,7 +50,7 @@ pub enum TokenKind {
     EOF,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Token {
     pub kind: TokenKind,
     pub lexeme: String,
@@ -85,9 +87,11 @@ impl<'a> Scanner<'a> {
                     self.chars.next(); // Skip both slashes for comments
                     self.chars.next();
 
-                    while self.chars.next().map_or(true, |c| c == '\n') {
+                    while self.chars.next().map_or(false, |c| c != '\n') {
                         // Skip rest of line till '\n'
                     }
+                } else {
+                    return; // Single slash -> must be used as token
                 }
                 // Ignore and don't consume slash if only one is there
             } else {
@@ -96,15 +100,18 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    pub fn token(&mut self) -> Option<Token> {
+    pub fn scan_token(&mut self) -> Token {
         self.lexeme.clear();
 
         self.skip_whitespace();
 
-        let c = self.advance()?;
+        let c = match self.advance() {
+            Some(c) => c,
+            None => return self.make_token(TokenKind::EOF),
+        };
 
         if c.is_alphabetic() || c == '_' {
-            return Some(self.identifier());
+            return self.identifier();
         }
 
         let kind = match c {
@@ -135,17 +142,17 @@ impl<'a> Scanner<'a> {
                 Some('=') => TokenKind::GreaterEqual,
                 _ => TokenKind::Greater,
             },
-            '"' => return Some(self.string()),
-            '0'..='9' => return Some(self.number()),
+            '"' => return self.string(),
+            '0'..='9' => return self.number(),
 
             _ => TokenKind::Error,
         };
 
-        Some(Token {
+        Token {
             kind,
             lexeme: self.lexeme.clone(),
             line: self.line,
-        })
+        }
     }
 
     fn make_token(&self, kind: TokenKind) -> Token {
@@ -266,5 +273,62 @@ impl<'a> Scanner<'a> {
         }
 
         self.error_token("Unterminated string")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn number() {
+        let mut scanner = Scanner::new("1");
+
+        let token = scanner.scan_token();
+
+        assert_eq!(token.kind, TokenKind::Number);
+        assert_eq!(token.lexeme, "1");
+        assert_eq!(token.line, 1);
+
+        assert_eq!(scanner.scan_token().kind, TokenKind::EOF);
+    }
+
+    #[test]
+    fn comment() {
+        let mut scanner = Scanner::new("1 //Comment");
+
+        assert_eq!(scanner.scan_token().kind, TokenKind::Number);
+        assert_eq!(scanner.scan_token().kind, TokenKind::EOF); // Comment skipped
+    }
+
+    #[test]
+    fn expr_in_line_after_comment() {
+        let mut scanner = Scanner::new(
+            "//Comment
+        1 // awda",
+        );
+
+        assert_eq!(scanner.scan_token().kind, TokenKind::Number); // Comment skipped
+        assert_eq!(scanner.scan_token().kind, TokenKind::EOF); // Trailing comment skipped
+    }
+
+    #[test]
+    fn div() {
+        let mut scanner = Scanner::new("1/2 //comment");
+
+        assert_eq!(scanner.scan_token().kind, TokenKind::Number);
+        assert_eq!(scanner.scan_token().kind, TokenKind::Slash);
+        assert_eq!(scanner.scan_token().kind, TokenKind::Number);
+        assert_eq!(scanner.scan_token().kind, TokenKind::EOF); // Comment skipped
+    }
+
+    #[test]
+    fn string() {
+        let mut scanner = Scanner::new("\"teststring\"");
+
+        let token = scanner.scan_token();
+
+        assert_eq!(token.kind, TokenKind::String);
+        assert_eq!(token.lexeme, "teststring");
     }
 }

@@ -1,7 +1,8 @@
 mod assembler;
 mod chunk;
-mod common;
 mod compiler;
+mod precedence;
+mod parser;
 mod scanner;
 mod value;
 mod vm;
@@ -14,27 +15,34 @@ use std::{
     process::exit,
 };
 
+use crate::vm::VM;
 use compiler::Compiler;
-use vm::InterpretationResult;
 
-use crate::{
-    assembler::Assembler,
-    chunk::{Chunk, OpCode},
-    value::Value,
-    vm::VM,
-};
+enum InterpretationError {
+    Runtime,
+    Compiletime,
+}
 
-fn interpret(source: String) -> InterpretationResult {
-    let compiler = Compiler::new(&source);
-
-    match compiler.compile() {
+fn interpret(source: String) -> Result<(), InterpretationError> {
+    match Compiler::compile(&source) {
         Err(e) => {
-            println!("Compiler-error: {}", e);
-            InterpretationResult::CompileError
+            println!("Compiler-error: {}", &e.msg);
+            Err(InterpretationError::Compiletime)
         }
         Ok(chunk) => {
+            #[cfg(debug_assertions)]
+            assembler::disassemble(&chunk, "code");
+
+            println!("\nStart of interpretation\n");
+            println!(
+                "{:04} {:4} {:-16} {}",
+                "ip", "line", "Instruction", "constant"
+            );
+
             let mut vm = VM::new();
+
             vm.interpret(chunk)
+                .map_err(|_| InterpretationError::Runtime)
         }
     }
 }
@@ -48,21 +56,21 @@ fn repl() -> Result<(), io::Error> {
 
         io::stdin().read_line(&mut buf)?;
 
-        println!("Interpreting {}", &buf);
+        println!("Interpreting  \"{}\"\n", buf.trim_end());
 
         match interpret(buf) {
-            InterpretationResult::CompileError => exit(65),
-            InterpretationResult::RuntimeError => exit(70),
-            InterpretationResult::OK => return Ok(()),
+            Err(InterpretationError::Compiletime) => exit(65),
+            Err(InterpretationError::Runtime) => exit(70),
+            Ok(()) => return Ok(()),
         }
     }
 }
 
 fn run_file(filename: String) -> Result<(), io::Error> {
     match interpret(std::fs::read_to_string(filename)?) {
-        InterpretationResult::CompileError => exit(65),
-        InterpretationResult::RuntimeError => exit(70),
-        InterpretationResult::OK => Ok(()),
+        Err(InterpretationError::Compiletime) => exit(65),
+        Err(InterpretationError::Runtime) => exit(70),
+        Ok(()) => Ok(()),
     }
 }
 
