@@ -1,4 +1,4 @@
-use std::{iter::Map, str::Chars};
+use std::str::Chars;
 extern crate variant_count;
 
 use peekmore::{PeekMore, PeekMoreIterator};
@@ -47,9 +47,8 @@ pub enum TokenKind {
     Var,
     While,
     Error,
-    EOF,
+    Eof,
 }
-
 #[derive(Clone, Debug)]
 pub struct Token<'src> {
     pub kind: TokenKind,
@@ -81,21 +80,21 @@ impl<'src> SourceSpan<'src> {
     }
 
     pub fn peek(&mut self) -> Option<char> {
-        self.chars.peek().map(|c| *c)
+        self.chars.peek().copied()
     }
 
     pub fn advance(&mut self) -> Option<char> {
         if !self.is_at_end() {
             self.current += 1;
         }
-        let c = self.chars.peek().map(|c| *c);
+        let c = self.chars.peek().copied();
         self.chars.next();
 
         c
     }
 
     pub fn peek_nth(&mut self, n: usize) -> Option<char> {
-        self.chars.peek_nth(n).map(|c| *c)
+        self.chars.peek_nth(n).copied()
     }
 
     pub fn lexeme(&self) -> &'src str {
@@ -149,7 +148,7 @@ impl<'src> Scanner<'src> {
 
         let c = match self.src.advance() {
             Some(c) => c,
-            None => return self.make_token(TokenKind::EOF),
+            None => return self.make_token(TokenKind::Eof),
         };
 
         if c.is_alphabetic() || c == '_' {
@@ -328,7 +327,7 @@ mod tests {
         assert_eq!(token.lexeme, "1");
         assert_eq!(token.line, 1);
 
-        assert_eq!(scanner.scan_token().kind, TokenKind::EOF);
+        assert_eq!(scanner.scan_token().kind, TokenKind::Eof);
     }
 
     #[test]
@@ -336,7 +335,7 @@ mod tests {
         let mut scanner = Scanner::new("1 //Comment");
 
         assert_eq!(scanner.scan_token().kind, TokenKind::Number);
-        assert_eq!(scanner.scan_token().kind, TokenKind::EOF); // Comment skipped
+        assert_eq!(scanner.scan_token().kind, TokenKind::Eof); // Comment skipped
     }
 
     #[test]
@@ -347,7 +346,7 @@ mod tests {
         );
 
         assert_eq!(scanner.scan_token().kind, TokenKind::Number); // Comment skipped
-        assert_eq!(scanner.scan_token().kind, TokenKind::EOF); // Trailing comment skipped
+        assert_eq!(scanner.scan_token().kind, TokenKind::Eof); // Trailing comment skipped
     }
 
     #[test]
@@ -357,7 +356,7 @@ mod tests {
         assert_eq!(scanner.scan_token().kind, TokenKind::Number);
         assert_eq!(scanner.scan_token().kind, TokenKind::Slash);
         assert_eq!(scanner.scan_token().kind, TokenKind::Number);
-        assert_eq!(scanner.scan_token().kind, TokenKind::EOF); // Comment skipped
+        assert_eq!(scanner.scan_token().kind, TokenKind::Eof); // Comment skipped
     }
 
     #[test]

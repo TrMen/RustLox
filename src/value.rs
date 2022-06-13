@@ -22,7 +22,7 @@ pub fn print_vec_val(values: &Vec<Value>) {
         print!("{}, ", val);
     }
 
-    print!("]\n");
+    println!("]");
 }
 
 type ValueResult = Result<Value, &'static str>;

@@ -28,7 +28,7 @@ pub fn disassemble_instruction(chunk: &Chunk, code_index: CodeIndex, content: Op
 
     match content {
         OpCode::Constant => constant_instruction(chunk, "CONSTANT", code_index + 1),
-        op @ _ => println!("{}", op),
+        op => println!("{}", op),
     }
 }
 
