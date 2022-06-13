@@ -603,14 +603,81 @@ impl<'src> Compiler<'src> {
             self.if_statement();
         } else if self.parser.match_advance(TokenKind::While) {
             self.while_statement();
+        } else if self.parser.match_advance(TokenKind::For) {
+            self.for_statement();
         } else if self.parser.match_advance(TokenKind::LeftBrace) {
             // TODO: Can't those scope begin/ends just go in the block()?
-            self.begin_scope();
+            let close = self.begin_scope();
             self.block();
-            self.end_scope();
+            self.end_scope(close);
         } else {
             self.expression_statement();
         }
+    }
+
+    fn for_statement(&mut self) {
+        let close = self.begin_scope();
+        self.parser
+            .consume(TokenKind::LeftParen, "Expect '(' after 'for'.");
+
+        // Initializer
+        if self.parser.match_advance(TokenKind::Var) {
+            self.var_declaration(VariableModifiers::Mutable);
+        } else if self.parser.match_advance(TokenKind::Let) {
+            self.parser.report_error_at_previous(&format!(
+                "Trying to define single-assignment loop variable in for statement. 
+                This variable is immutable. Try 'for(var {} = ...';...)'",
+                self.parser.current.lexeme
+            ));
+            return;
+        } else {
+            self.expression_statement();
+        }
+
+        let mut loop_start = self.chunk.code_bytes_len();
+
+        // Condition
+        let exit_jmp = if !self.parser.match_advance(TokenKind::Semicolon) {
+            self.expression();
+            self.parser
+                .consume(TokenKind::Semicolon, "Expect ';' after for loop condition.");
+
+            let exit = self.emit_jmp_with_placeholder(OpCodeWithArg::JumpIfFalse);
+            self.emit_op(OpCodeWithoutArg::Pop);
+            Some(exit)
+        } else {
+            None
+        };
+
+        // Increment clause
+
+        if !self.parser.match_advance(TokenKind::RightParen) {
+            // Parses before the body, but executed after it. So we'll jump over the increment, and at the end
+            // of the body, jump back and run the increment.
+
+            let body_jmp = self.emit_jmp_with_placeholder(OpCodeWithArg::JumpForward);
+            let increment_start = self.chunk.code_bytes_len();
+
+            self.expression();
+            self.emit_op(OpCodeWithoutArg::Pop); // The increment is just for it's effect, so discard the expr value
+            self.parser
+                .consume(TokenKind::RightParen, "Expect ')' after for clauses.");
+
+            self.emit_jmp_backwards(loop_start);
+            loop_start = increment_start;
+            self.backpatch_jmp(body_jmp)
+        }
+
+        self.statement();
+
+        self.emit_jmp_backwards(loop_start);
+
+        if let Some(exit_jmp) = exit_jmp {
+            self.backpatch_jmp(exit_jmp);
+            self.emit_op(OpCodeWithoutArg::Pop); // TODO: I don't like having to do jmp + pop everywhere. Error-prone
+        }
+
+        self.end_scope(close);
     }
 
     fn while_statement(&mut self) {
