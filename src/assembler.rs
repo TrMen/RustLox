@@ -1,57 +1,55 @@
-use crate::chunk::{Chunk, OpCode};
+use std::rc::Rc;
+
+use crate::chunk::{Chunk, ChunkContent, CodeIndex, OpCode};
 
 pub struct Assembler {
-    last_line: Option<u32>,
+    chunk: Rc<Chunk>,
 }
 
 impl Assembler {
     pub fn new() -> Assembler {
-        Assembler { last_line: None }
+        Assembler {
+            chunk: Rc::new(Chunk::new()),
+        }
     }
 
-    pub fn disassemble(&mut self, chunk: &Chunk, name: &str) {
+    pub fn disassemble(&mut self, chunk: Rc<Chunk>, name: &str) {
+        self.chunk = chunk;
+
         println!("== {} ==\n", name);
 
-        let mut iter = chunk.code_iter().enumerate();
+        let mut iter = self.chunk.iter().enumerate();
 
-        while let Some((offset, _)) = iter.next() {
-            self.disassemble_instruction(chunk, offset);
+        while let Some((code_index, content)) = iter.next() {
+            self.disassemble_instruction(code_index, content);
         }
     }
 
-    pub fn disassemble_instruction(&mut self, chunk: &Chunk, offset: usize) {
-        print!("{:04} ", offset);
+    pub fn disassemble_instruction(&self, code_index: CodeIndex, content: ChunkContent) {
+        print!("{:04} ", code_index);
 
-        let line = chunk.get_line(offset).expect("No line saved for offset");
+        let line = self
+            .chunk
+            .get_line(code_index)
+            .expect("No line saved for offset");
 
-        if self.last_line == Some(line) {
-            print!("   | ");
-        } else {
-            print!("{:4} ", line);
-        }
+        print!("{:4} ", line);
 
-        self.last_line = Some(line);
-
-        let op = chunk.get_op(offset);
-
-        if op.is_none() {
-            return;
-        }
-
-        match op.unwrap() {
-            OpCode::Constant(constant_index) => {
-                constant_instruction("CONSTANT", chunk, constant_index)
+        match content {
+            ChunkContent::Code(OpCode::Constant) => {
+                self.constant_instruction("CONSTANT", code_index)
             }
-            _ => println!("{}", op.unwrap()),
+            ChunkContent::Code(op) => println!("{}", op),
+            _ => (), // Ignore constants
         }
     }
-}
 
-fn constant_instruction(name: &str, chunk: &Chunk, constant_index: u16) {
-    println!(
-        "{:-16} {:4} '{}'",
-        name,
-        constant_index,
-        chunk.get_constant(constant_index),
-    );
+    fn constant_instruction(&self, name: &str, code_offset: CodeIndex) {
+        println!(
+            "{:-16} {:4} '{}'",
+            name,
+            code_offset,
+            self.chunk.constant_at_code_index(code_offset),
+        );
+    }
 }

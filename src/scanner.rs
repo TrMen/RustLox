@@ -4,7 +4,7 @@ use peekmore::{PeekMore, PeekMoreIterator};
 
 use strum_macros::Display;
 
-#[derive(Display)]
+#[derive(Display, Clone, Copy, PartialEq)]
 pub enum TokenKind {
     LeftParen,
     RightParen,
@@ -45,8 +45,10 @@ pub enum TokenKind {
     Var,
     While,
     Error,
+    EOF,
 }
 
+#[derive(Clone)]
 pub struct Token {
     pub kind: TokenKind,
     pub lexeme: String,
@@ -166,6 +168,8 @@ impl<'a> Scanner<'a> {
         while let Some(c) = self.chars.peek() {
             if c.is_alphanumeric() || c == &'_' {
                 self.advance();
+            } else {
+                return self.make_token(self.identifier_kind());
             }
         }
 

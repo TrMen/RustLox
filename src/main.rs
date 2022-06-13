@@ -6,6 +6,9 @@ mod scanner;
 mod value;
 mod vm;
 
+#[macro_use]
+extern crate num_derive;
+
 use std::{
     io::{self, Write},
     process::exit,
@@ -22,9 +25,18 @@ use crate::{
 };
 
 fn interpret(source: String) -> InterpretationResult {
-    let mut vm = VM::new();
+    let compiler = Compiler::new(&source);
 
-    vm.interpret(source)
+    match compiler.compile() {
+        Err(e) => {
+            println!("Compiler-error: {}", e);
+            InterpretationResult::CompileError
+        }
+        Ok(chunk) => {
+            let mut vm = VM::new();
+            vm.interpret(chunk)
+        }
+    }
 }
 
 fn repl() -> Result<(), io::Error> {
@@ -36,9 +48,7 @@ fn repl() -> Result<(), io::Error> {
 
         io::stdin().read_line(&mut buf)?;
 
-        let x = buf
-            .chars()
-            .skip_while(|c| *c == ' ' || *c == '\r' || *c == '\t');
+        println!("Interpreting {}", &buf);
 
         match interpret(buf) {
             InterpretationResult::CompileError => exit(65),
