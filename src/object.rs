@@ -27,8 +27,14 @@ pub enum Object {
 }
 
 impl Object {
-    pub fn from_string(string: String, interned_strings: &mut IndexableStringSet) -> Rc<Self> {
+    pub fn from_str(string: &str, interned_strings: &mut IndexableStringSet) -> Rc<Self> {
         let index = interned_strings.get_or_insert(string);
+
+        Rc::new(Object::String(ObjString { index }))
+    }
+
+    pub fn from_string(string: String, interned_strings: &mut IndexableStringSet) -> Rc<Self> {
+        let index = interned_strings.get_or_insert_existing(string);
 
         Rc::new(Object::String(ObjString { index }))
     }

@@ -1,3 +1,4 @@
 var beverage = "cafe au lait";
 var breakfast = "beignets with " + beverage;
+var test_dedup = "cafe au lait"; // String literal shouldn't be present twice in interned strings
 print breakfast;

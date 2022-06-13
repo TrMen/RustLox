@@ -10,4 +10,3 @@
   - And the name declaration happens before that
 - Variables don't persist in repl, since I made everyrthing single-pass, oops
 - Assignment isn't implemented yet
-- Make IndexableStringSet::get_or_insert() take a reference to prevent move in case of string already being interned
