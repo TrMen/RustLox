@@ -17,7 +17,7 @@ impl IndexableStringSet {
         }
     }
 
-    pub fn get_by_index(&self, index: usize) -> &String {
+    pub fn get_by_index(&self, index: usize) -> &str {
         self.strings[index].as_ref().unwrap()
     }
 

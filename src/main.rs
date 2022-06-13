@@ -29,23 +29,27 @@ enum InterpretationError {
     Compiletime,
 }
 
-fn interpret(source: String) -> Result<(), InterpretationError> {
+fn interpret(source: String, source_name: String) -> Result<(), InterpretationError> {
     match Compiler::compile(&source) {
         Err(e) => {
-            println!("Compiler-error: {}", &e.msg);
+            println!("Compiler-error: {}", e.msg);
             Err(InterpretationError::Compiletime)
         }
         Ok((chunk, object_list, strings)) => {
-            #[cfg(debug_assertions)]
-            assembler::disassemble(&chunk, "code");
+            if cfg!(debug_assertions) {
+                assembler::disassemble(&chunk, "code");
 
-            println!("\nStart of interpretation\n");
-            println!("{:04} {:4} {:-16} constant", "ip", "line", "Instruction");
+                println!("\nStart of interpretation\n");
+                println!("{:04} {:4} {:-16} constant", "ip", "line", "Instruction");
+            }
 
-            let mut vm = VM::new(object_list, strings);
+            let mut vm = VM::new(object_list, strings, source_name);
 
-            vm.interpret(chunk)
-                .map_err(|_| InterpretationError::Runtime)
+            vm.interpret(chunk).map_err(|err| {
+                println!("Runtime Error: {}", err.msg);
+
+                InterpretationError::Runtime
+            })
         }
     }
 }
@@ -59,15 +63,17 @@ fn repl() -> Result<(), io::Error> {
 
         io::stdin().read_line(&mut buf)?;
 
+        #[cfg(debug_assertions)]
         println!("Interpreting  \"{}\"\n", buf.trim_end());
 
         // Ignore error to keep the repl going
-        let _ = interpret(buf);
+        let _ = interpret(buf, "repl".to_string());
     }
 }
 
 fn run_file(filename: String) -> Result<(), io::Error> {
-    match interpret(std::fs::read_to_string(filename)?) {
+    let source_name = filename.to_string();
+    match interpret(std::fs::read_to_string(filename)?, source_name) {
         Err(InterpretationError::Compiletime) => exit(65),
         Err(InterpretationError::Runtime) => exit(70),
         Ok(()) => Ok(()),

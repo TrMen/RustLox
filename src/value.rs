@@ -29,10 +29,10 @@ pub fn print_vec_val(values: &Vec<Value>) {
 type ValueResult = Result<Value, &'static str>;
 
 impl Value {
-    pub fn as_string(&self, strings: &IndexableStringSet) -> String {
+    pub fn as_str<'a>(&self, strings: &'a IndexableStringSet) -> &'a str {
         if let Value::Obj(obj) = self {
             if let Object::String(name) = &**obj {
-                strings.get_by_index(name.index).to_owned()
+                strings.get_by_index(name.index)
             } else {
                 panic!("Global constant must be string");
             }

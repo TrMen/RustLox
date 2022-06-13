@@ -20,10 +20,11 @@ pub struct VM {
     pub objects: ObjectList,
     pub strings: IndexableStringSet,
     globals: HashMap<String, Value>,
+    source_name: String,
 }
 
 impl VM {
-    pub fn new(objects: ObjectList, strings: IndexableStringSet) -> VM {
+    pub fn new(objects: ObjectList, strings: IndexableStringSet, source_name: String) -> VM {
         VM {
             chunk: Chunk::new(),
             ip: 0,
@@ -31,6 +32,7 @@ impl VM {
             objects,
             strings,
             globals: HashMap::new(),
+            source_name,
         }
     }
 
@@ -49,6 +51,7 @@ impl VM {
                     println!("\nGlobals: {:?}", self.globals);
                     println!("\nStrings: {:?}", self.strings);
                 }
+
                 return Ok(()); // Done interpreting
             }
 
@@ -65,8 +68,17 @@ impl VM {
 
             self.ip += 1; // ip must always point to the next instruction while executing the last
 
-            if let Err(err) = self.execute_instruction(instruction.unwrap()) {
-                self.runtime_error(&err.msg);
+            if let Err(mut err) = self.execute_instruction(instruction.unwrap()) {
+                err.msg = format!(
+                    "{}\n [line {}] in {}",
+                    err.msg,
+                    self.chunk
+                        .get_line(self.ip - 1) // Last op, because ip always points at the op about to execute
+                        .expect("No line saved for current instruction"),
+                    self.source_name,
+                );
+
+                self.stack.clear();
                 return Err(err);
             }
         }
@@ -136,18 +148,19 @@ impl VM {
                 self.stack.pop();
             }
             OpCode::DefineGlobal => {
-                let identifier = self.read_constant().as_string(&self.strings);
+                let identifier = self.read_constant().as_str(&self.strings);
 
-                self.globals.insert(identifier, self.peek().clone());
+                self.globals
+                    .insert(identifier.to_owned(), self.peek().clone());
 
                 // Don't pop the value till after insertion into globals,
                 // to prevent GC cleanup while we're inserting
                 self.pop();
             }
             OpCode::GetGlobal => {
-                let identifier = self.read_constant().as_string(&self.strings);
+                let identifier = self.read_constant().as_str(&self.strings);
 
-                if let Some(val) = self.globals.get(&identifier) {
+                if let Some(val) = self.globals.get(identifier) {
                     self.stack.push(val.clone());
                 } else {
                     return Err(RuntimeError {
@@ -183,18 +196,6 @@ impl VM {
         println!("Unary op left '{:?}' on the stack", self.stack.last());
 
         Ok(())
-    }
-
-    fn runtime_error(&mut self, msg: &str) {
-        println!(
-            "{}\n [line {}] in script",
-            msg,
-            self.chunk
-                .get_line(self.ip - 1) // Last op, because ip always points at the op about to execute
-                .expect("No line saved for current instruction"),
-        );
-
-        self.stack.clear();
     }
 
     pub fn binary_op(
@@ -248,7 +249,11 @@ mod tests {
 
     #[test]
     fn constant() {
-        let mut vm = VM::new(ObjectList::new(), IndexableStringSet::new());
+        let mut vm = VM::new(
+            ObjectList::new(),
+            IndexableStringSet::new(),
+            "constant_test".to_string(),
+        );
 
         let (chunk, _, _) = Compiler::compile("1;").unwrap();
 
