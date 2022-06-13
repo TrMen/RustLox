@@ -93,7 +93,7 @@ pub struct Compiler<'src> {
 }
 
 impl<'src> Compiler<'src> {
-    pub fn compile(source: &'src str) -> Result<(Chunk, ObjectList), CompiletimeError> {
+    pub fn compile(source: &str) -> Result<(Chunk, ObjectList), CompiletimeError> {
         let mut compiler = Compiler {
             rules: init_rules(),
             scanner: Scanner::new(source),
@@ -238,14 +238,14 @@ impl<'src> Compiler<'src> {
     }
 
     fn string(&mut self) {
-        // This can be omitted. Instead of having constants in the object list, they could just be
+        // TODO: This can be omitted. Instead of having constants in the object list, they could just be
         // saved in the constant array. That way, we guarantee that they aren't mutated, and save some
         // heap allocations.
         let string_object = self
             .objects
-            .add_from_string(self.parser.previous.lexeme.to_string());
+            .add_string(self.parser.previous.lexeme.to_string());
 
-        // It's fine to directly insert constants into the chunk, without usign an ObjectList,
+        // It's fine to directly insert constants into the chunk, without using an ObjectList,
         // because constants do not get freed at runtime. Only after the end of the program.
         self.emit_constant(Value::Obj(string_object));
     }

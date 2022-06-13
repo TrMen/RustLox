@@ -34,7 +34,7 @@ pub fn disassemble_instruction(chunk: &Chunk, code_index: CodeIndex, content: Op
 
 fn constant_instruction(chunk: &Chunk, name: &str, code_index: CodeIndex) {
     println!(
-        "{:-16} '{}'",
+        "{:-16} '{:?}'",
         name,
         chunk.constant_at_code_index(code_index),
     );
