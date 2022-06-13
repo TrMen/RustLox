@@ -4,6 +4,7 @@ use crate::value::Value;
 use num_traits::FromPrimitive;
 use strum_macros::Display;
 
+// TODO: Document difference between these types
 pub type ConstantIndex = u16;
 pub type CodeIndex = usize;
 
@@ -104,6 +105,7 @@ pub struct LineInformation {
 }
 
 // Contains opcodes, constants and their associated source code lines
+#[derive(Debug)]
 pub struct Chunk {
     pub code: Vec<u8>,
     pub constants: Vec<Value>,
@@ -175,7 +177,7 @@ impl Chunk {
 
         let combined_index = u16::from_be_bytes([high, low]);
 
-        &self.constants[combined_index as CodeIndex]
+        &self.constants[combined_index as usize]
     }
 
     pub fn instruction_at(&self, code_index: CodeIndex) -> Option<OpCode> {

@@ -17,6 +17,12 @@ impl IndexableStringSet {
         }
     }
 
+    pub fn merge(&mut self, _other: IndexableStringSet) {
+        todo!("This doesn't work. It makes existing indices wrong")
+        // self.strings.extend(other.strings);
+        // self.hash_builder = other.hash_builder;
+    }
+
     pub fn get_by_index(&self, index: usize) -> &str {
         self.strings[index].as_ref().unwrap()
     }

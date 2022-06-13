@@ -55,4 +55,9 @@ impl ObjectList {
     pub fn add_existing_object(&mut self, object: Rc<Object>) {
         self.objects.push(object);
     }
+
+    pub fn merge(&mut self, other: ObjectList) {
+        // TODO: Might need to be a big more sophisitcated here
+        self.objects.extend(other.objects);
+    }
 }

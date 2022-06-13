@@ -26,41 +26,35 @@ impl<'src> Parser<'src> {
     }
 
     pub fn report_error_at_current(&mut self, msg: &str) {
-        if self.panic_mode {
-            return;
-        }
-
-        Self::report_error_at(&self.current, msg);
-
-        self.had_error = true;
-        self.panic_mode = true;
+        self.report_error_at(&self.previous.clone(), msg);
     }
 
     pub fn report_error_at_previous(&mut self, msg: &str) {
+        // Cloning token here is fine since it's just for error reporting
+        self.report_error_at(&self.previous.clone(), msg);
+    }
+
+    pub fn report_error_at(&mut self, token: &Token, msg: &str) {
         if self.panic_mode {
             return;
         }
 
-        Self::report_error_at(&self.previous, msg);
-
-        self.had_error = true;
-        self.panic_mode = true;
-    }
-
-    fn report_error_at(token: &Token, msg: &str) {
-        print!("[line {}] Error", token.line);
+        eprint!("[line {}] Error", token.line);
 
         match token.kind {
-            TokenKind::Eof => print!(" at end"),
+            TokenKind::Eof => eprint!(" at end"),
             TokenKind::Error => (),
-            _ => print!(" at '{}'", token.lexeme),
+            _ => eprint!(" at '{}'", token.lexeme),
         }
 
         if msg.is_empty() {
-            println!();
+            eprintln!();
         } else {
-            println!(": '{}'", msg);
+            eprintln!(": '{}'", msg);
         }
+
+        self.had_error = true;
+        self.panic_mode = true;
     }
 
     /// Sets the next token as parser's current token, and returns a reference to it
