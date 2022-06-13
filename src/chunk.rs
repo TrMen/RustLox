@@ -40,7 +40,7 @@ pub struct LineInformation {
 
 pub struct Chunk {
     pub code: Vec<u8>,
-    constants: Vec<Value>,
+    pub constants: Vec<Value>,
     pub lines: Vec<LineInformation>,
 }
 
@@ -119,8 +119,6 @@ impl Chunk {
 
 #[cfg(test)]
 mod tests {
-    use num_traits::{FromPrimitive, ToPrimitive};
-
     use super::*;
     #[test]
     fn lines() {

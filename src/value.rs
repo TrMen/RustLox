@@ -1,14 +1,28 @@
 use std::{
+    collections::HashSet,
     fmt::Display,
     ops::{Add, Div, Mul, Neg, Not, Sub},
+    rc::Rc,
 };
 
-#[derive(Debug, PartialEq, Clone)]
+use crate::object::{ObjString, Object};
+
+#[derive(Debug, PartialEq, Clone)] // TODO: Remove clone for possible string-deduplication
 pub enum Value {
     Double(f32),
     Bool(bool),
     Nil,
-    Object(String),
+    Obj(Rc<Object>),
+}
+
+pub fn print_vec_val(values: &Vec<Value>) {
+    print!("[");
+
+    for val in values {
+        print!("{}, ", val);
+    }
+
+    print!("]\n");
 }
 
 type ValueResult = Result<Value, &'static str>;
@@ -22,6 +36,14 @@ impl Value {
         }
     }
 
+    pub fn gt(lhs: Value, rhs: Value) -> ValueResult {
+        Value::compare(&lhs, &rhs, PartialOrd::gt)
+    }
+
+    pub fn lt(lhs: Value, rhs: Value) -> ValueResult {
+        Value::compare(&lhs, &rhs, PartialOrd::lt)
+    }
+
     fn compare(&self, other: &Value, op: impl FnOnce(&f32, &f32) -> bool) -> ValueResult {
         if let (Value::Double(lhs), Value::Double(rhs)) = (self, other) {
             Ok(Value::Bool(op(lhs, rhs)))
@@ -30,22 +52,44 @@ impl Value {
         }
     }
 
-    pub fn gt(lhs: Value, rhs: Value) -> ValueResult {
-        Value::compare(&lhs, &rhs, PartialOrd::gt)
+    fn compare_strings(&self, interned_strings: HashSet<ObjString>, rhs: &Value) -> bool {
+        todo!();
     }
 
-    pub fn lt(lhs: Value, rhs: Value) -> ValueResult {
-        Value::compare(&lhs, &rhs, PartialOrd::lt)
+    fn as_string(&self) -> Option<&ObjString> {
+        if let Value::Obj(obj) = self {
+            match obj.as_ref() {
+                Object::String(str) => Some(str),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    fn copy(&self, interned_strings: HashSet<String>) -> Value {
+        todo!();
+        /*if let Some(str) = self.as_string() {
+            if let Some(existing_string) = interned_strings.get(&str.string) {
+                Value::Obj(Object::from_string(existing_string))
+            }
+            else {
+                Value::Obj(Object::from_string(str.string)
+            }
+        }
+        else {
+
+        }*/
     }
 }
 
 impl Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Value::Nil => write!(f, "nil"),
             Value::Double(val) => write!(f, "{}", val),
             Value::Bool(val) => write!(f, "{}", val),
-            Value::Nil => write!(f, "nil"),
-            Value::Object(obj) => write!(f, "Object {:?}", obj),
+            Value::Obj(val) => write!(f, "{}", val),
         }
     }
 }
@@ -74,10 +118,18 @@ impl Add for Value {
     type Output = ValueResult;
 
     fn add(self, rhs: Self) -> Self::Output {
-        if let (Value::Double(lhs), Value::Double(rhs)) = (self, rhs) {
+        if let (Value::Double(lhs), Value::Double(rhs)) = (&self, &rhs) {
             Ok(Value::Double(lhs + rhs))
+        } else if let (Value::Obj(lhs), Value::Obj(rhs)) = (self, rhs) {
+            if let (Object::String(lhs), Object::String(rhs)) = (lhs.as_ref(), rhs.as_ref()) {
+                Ok(Value::Obj(Object::from_string(
+                    lhs.string.clone() + &rhs.string,
+                )))
+            } else {
+                Err("Operands must be numbers or strings")
+            }
         } else {
-            Err("Operands must be numbers")
+            Err("Operands must be numbers or strings")
         }
     }
 }
