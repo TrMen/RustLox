@@ -51,43 +51,65 @@ pub enum TokenKind {
 }
 
 #[derive(Clone, Debug)]
-pub struct Token {
+pub struct Token<'src> {
     pub kind: TokenKind,
-    pub lexeme: String,
+    pub lexeme: &'src str,
     pub line: i32,
 }
 
-pub struct Scanner<'a> {
-    chars: PeekMoreIterator<Chars<'a>>,
+pub struct Scanner<'src> {
+    source: &'src str,
     line: i32,
-    lexeme: String,
+    start: usize,
+    current: usize,
+    source_len: usize,
 }
 
-impl<'a> Scanner<'a> {
-    pub fn new(source: &'a str) -> Scanner<'a> {
+impl<'src> Scanner<'src> {
+    pub fn new(source: &'src str) -> Scanner<'src> {
         Scanner {
-            chars: source.chars().peekmore(),
+            source,
             line: 1,
-            lexeme: String::new(),
+            start: 0,
+            current: 0,
+            source_len: source.chars().count(),
         }
     }
 
+    fn is_at_end(&self) -> bool {
+        self.current >= self.source_len
+    }
+
+    fn peek(&self) -> Option<char> {
+        self.source.chars().nth(self.current) // TODO: Check off-by-one
+    }
+
     fn advance(&mut self) -> Option<char> {
-        self.lexeme.push(self.chars.next()?);
-        Some(self.lexeme.chars().last()?)
+        if !self.is_at_end() {
+            self.current += 1; // TODO: Check off-by-one
+        }
+        self.source.chars().nth()
+    }
+
+    fn peek_nth(&self, n: usize) -> Option<char> {
+        self.source.chars().nth(self.current + n) // TODO: Check off-by-one
+    }
+
+    fn lexeme(&self) -> &'src str {
+        &self.source[self.start..self.current + 1]
     }
 
     fn skip_whitespace(&mut self) {
-        while let Some(c @ (' ' | '\t' | '\r' | '\n' | '/')) = self.chars.peek() {
-            if c == &'\n' {
+        while let Some(c @ (' ' | '\t' | '\r' | '\n' | '/')) = self.peek() {
+            if c == '\n' {
                 self.line += 1;
-                self.chars.next();
-            } else if c == &'/' {
-                if let Some('/') = self.chars.peek_nth(1) {
-                    self.chars.next(); // Skip both slashes for comments
-                    self.chars.next();
+                self.advance();
+            } else if c == '/' {
+                if let Some('/') = self.peek_nth(1) {
+                    self.advance(); // Skip both slashes for comments
+                    self.advance();
 
-                    while self.chars.next().map_or(false, |c| c != '\n') {
+                    while self.advance().map_or(false, |c| c != '\n') {
                         // Skip rest of line till '\n'
                     }
                 } else {
@@ -95,13 +117,17 @@ impl<'a> Scanner<'a> {
                 }
                 // Ignore and don't consume slash if only one is there
             } else {
-                self.chars.next();
+                self.advance();
             }
         }
+
+        println!("lexeme at end of skip_whitespace {}", self.lexeme());
+        println!("self.start: {}", self.start);
+        println!("self.current: {}", self.current);
     }
 
-    pub fn scan_token(&mut self) -> Token {
-        self.lexeme.clear();
+    pub fn scan_token(&mut self) -> Token<'src> {
+        self.start = self.current;
 
         self.skip_whitespace();
 
@@ -148,32 +174,34 @@ impl<'a> Scanner<'a> {
             _ => TokenKind::Error,
         };
 
-        Token {
-            kind,
-            lexeme: self.lexeme.clone(),
-            line: self.line,
-        }
+        println!("c: {}", c);
+
+        self.make_token(kind)
     }
 
-    fn make_token(&self, kind: TokenKind) -> Token {
-        Token {
+    fn make_token(&self, kind: TokenKind) -> Token<'src> {
+        let token = Token {
             kind,
             line: self.line,
-            lexeme: self.lexeme.clone(),
-        }
+            lexeme: self.lexeme(),
+        };
+
+        println!("Adding: {:?}", token);
+
+        token
     }
 
-    fn error_token(&self, message: &str) -> Token {
+    fn error_token(&self, message: &'src str) -> Token<'src> {
         Token {
             kind: TokenKind::Error,
             line: self.line,
-            lexeme: String::from(message),
+            lexeme: message,
         }
     }
 
-    fn identifier(&mut self) -> Token {
-        while let Some(c) = self.chars.peek() {
-            if c.is_alphanumeric() || c == &'_' {
+    fn identifier(&mut self) -> Token<'src> {
+        while let Some(c) = self.peek() {
+            if c.is_alphanumeric() || c == '_' {
                 self.advance();
             } else {
                 return self.make_token(self.identifier_kind());
@@ -190,7 +218,7 @@ impl<'a> Scanner<'a> {
         // I'm not 100% sure that would actually be less efficient, but V8 does it like
         // this, so it must be alright. Also, state-machines are how most regex-parsers work
 
-        let mut lexeme_iter = self.lexeme.chars();
+        let mut lexeme_iter = self.lexeme().chars();
 
         match lexeme_iter.next().unwrap() {
             'l' => self.check_keyword("let", TokenKind::Var),
@@ -222,7 +250,7 @@ impl<'a> Scanner<'a> {
     }
 
     fn check_keyword(&self, keyword: &str, kind: TokenKind) -> TokenKind {
-        if self.lexeme == keyword {
+        if self.lexeme() == keyword {
             kind
         } else {
             TokenKind::Identifier
@@ -230,7 +258,7 @@ impl<'a> Scanner<'a> {
     }
 
     fn peek_and_advance_if(&mut self, expected: char) -> Option<char> {
-        let next = *self.chars.peek()?;
+        let next = self.peek()?;
 
         if next == expected {
             self.advance();
@@ -239,17 +267,15 @@ impl<'a> Scanner<'a> {
         Some(next)
     }
 
-    fn number(&mut self) -> Token {
-        while let Some('0'..='9') = self.chars.peek() {
+    fn number(&mut self) -> Token<'src> {
+        while let Some('0'..='9') = self.peek() {
             self.advance(); // pushes all digits into self.lexeme
         }
 
-        if self.chars.peek() == Some(&'.')
-            && self.chars.peek_nth(1).map_or(false, |c| c.is_digit(10))
-        {
+        if self.peek() == Some('.') && self.peek_nth(1).map_or(false, |c| c.is_digit(10)) {
             self.advance(); // Consome '.'
 
-            while let Some('0'..='9') = self.chars.peek() {
+            while let Some('0'..='9') = self.peek() {
                 self.advance(); // Save all post-dot digits.
             }
         }
@@ -257,10 +283,10 @@ impl<'a> Scanner<'a> {
         self.make_token(TokenKind::Number)
     }
 
-    fn string(&mut self) -> Token {
-        self.lexeme.clear();
+    fn string(&mut self) -> Token<'src> {
+        self.start = self.current;
 
-        while let Some(c) = self.chars.next() {
+        while let Some(c) = self.advance() {
             if c == '\n' {
                 self.line += 1;
             }
@@ -269,7 +295,7 @@ impl<'a> Scanner<'a> {
                 return self.make_token(TokenKind::String);
             }
 
-            self.lexeme.push(c);
+            self.current += 1;
         }
 
         self.error_token("Unterminated string")
