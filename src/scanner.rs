@@ -45,6 +45,7 @@ pub enum TokenKind {
     This,
     True,
     Var,
+    Let, // For single-assignment variables
     While,
     Error,
     Eof,
@@ -230,7 +231,7 @@ impl<'src> Scanner<'src> {
         let mut lexeme_iter = self.src.lexeme().chars();
 
         match lexeme_iter.next().unwrap() {
-            'l' => self.check_keyword("let", TokenKind::Var),
+            'l' => self.check_keyword("let", TokenKind::Let),
             'a' => self.check_keyword("and", TokenKind::And),
             'c' => self.check_keyword("class", TokenKind::Class),
             'e' => self.check_keyword("else", TokenKind::Else),

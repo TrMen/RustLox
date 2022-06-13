@@ -1,0 +1,36 @@
+{
+    // Should actually apply the immutable to the correct var accessed
+    var lv = 23;
+    
+    let lc = 420;
+
+    lv = 33; // Fine
+}
+
+
+
+let reassigning_to_global = 30;
+
+reassigning_to_global = 20; // Comptime error
+
+var mutable_global = 40; // Should comptime error
+
+{
+    let local_const = 20;
+    local_const = 30; // Comptime error
+
+    var lv = 23;
+    lv = 33; // Fine
+}
+
+{
+    doesntexist = 20; // Should correctly error nonexistant, rather than unassignable
+
+    let existing = 20;
+    let existing = 30; // Comptime error: Redefinition of local variable
+}
+
+let redef_global = 20;
+let redef_global = 30; // Comptime Error: Redefinition of global variable
+
+let alias_to_nil; // Comptime error, single-assignment without value isn't too useful.

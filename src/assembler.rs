@@ -34,7 +34,7 @@ pub fn disassemble_instruction(chunk: &Chunk, code_index: CodeIndex, content: Op
 
     // TODO: Make these use OpCodeWithArg
     match content {
-        op @ (OpCode::Constant | OpCode::DefineGlobal | OpCode::GetGlobal | OpCode::SetGlobal) => {
+        op @ (OpCode::Constant | OpCode::DefineGlobal | OpCode::GetGlobal) => {
             println!(
                 "{op:-16} '{:?}'",
                 chunk.constant_at_code_index(code_index + 1),
