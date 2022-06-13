@@ -155,6 +155,9 @@ impl VM {
                     });
                 }
             }
+            OpCode::SetGlobal => {
+                todo!()
+            }
         }
 
         Ok(())
@@ -247,7 +250,7 @@ mod tests {
     fn constant() {
         let mut vm = VM::new(ObjectList::new(), IndexableStringSet::new());
 
-        let (chunk, _, _) = Compiler::compile("1").unwrap();
+        let (chunk, _, _) = Compiler::compile("1;").unwrap();
 
         assert_eq!(vm.interpret(chunk), Ok(()));
     }
