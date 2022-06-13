@@ -3,7 +3,10 @@ use std::{
     rc::Rc,
 };
 
-use crate::object::{Object, ObjectList};
+use crate::{
+    indexable_string_set::IndexableStringSet,
+    object::{Object, ObjectList},
+};
 
 #[derive(Debug, Clone)] // TODO: Remove clone for possible string-deduplication
 pub enum Value {
@@ -26,7 +29,19 @@ pub fn print_vec_val(values: &Vec<Value>) {
 type ValueResult = Result<Value, &'static str>;
 
 impl Value {
-    pub fn stringify(&self, objects: &ObjectList) -> String {
+    pub fn as_string(&self, strings: &IndexableStringSet) -> String {
+        if let Value::Obj(obj) = self {
+            if let Object::String(name) = &**obj {
+                strings.get_by_index(name.index).to_owned()
+            } else {
+                panic!("Global constant must be string");
+            }
+        } else {
+            panic!("Global constant must be string");
+        }
+    }
+
+    pub fn stringify(&self, strings: &IndexableStringSet) -> String {
         // TODO: Stringify shouldn't require heap allocation, except for doubles
         // and it's only for display, so doubles don't need to be allocated either
         match self {
@@ -34,7 +49,7 @@ impl Value {
             Value::Double(val) => val.to_string(),
             Value::Bool(val) => val.to_string(),
             Value::Obj(val) => match &**val {
-                Object::String(str) => objects.get_string_by_index(str.index).to_owned(),
+                Object::String(str) => strings.get_by_index(str.index).to_owned(),
             },
         }
     }
@@ -57,15 +72,21 @@ impl Value {
 
     // Cannot be std::core::ops::Add because it needs to know how to add
     // newly allocated string to ObjectList
-    pub fn add(self, rhs: Self, objects: &mut ObjectList) -> ValueResult {
+    pub fn add(
+        self,
+        rhs: Self,
+        strings: &mut IndexableStringSet,
+        objects: &mut ObjectList,
+    ) -> ValueResult {
         if let (Value::Double(lhs), Value::Double(rhs)) = (&self, &rhs) {
             Ok(Value::Double(lhs + rhs))
         } else if let (Value::Obj(lhs), Value::Obj(rhs)) = (self, rhs) {
             if let (Object::String(lhs), Object::String(rhs)) = (lhs.as_ref(), rhs.as_ref()) {
-                let concatenated = objects.get_string_by_index(lhs.index).to_owned()
-                    + objects.get_string_by_index(rhs.index);
+                let concatenated =
+                    strings.get_by_index(lhs.index).to_owned() + strings.get_by_index(rhs.index);
 
-                let obj_string = objects.add_string(concatenated);
+                let obj_string = Object::from_string(concatenated, strings);
+                objects.add_existing_object(obj_string.clone());
 
                 Ok(Value::Obj(obj_string))
             } else {

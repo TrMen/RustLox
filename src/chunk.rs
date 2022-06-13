@@ -10,6 +10,10 @@ pub type CodeIndex = usize;
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Display, FromPrimitive, ToPrimitive, PartialEq)]
 pub enum OpCode {
+    GetGlobal,
+    DefineGlobal,
+    Pop,
+    Print,
     Return,
     Constant,
     Nil, // Nil, True, False are optimizations for avoiding constant lookup in those cases
@@ -38,6 +42,7 @@ pub struct LineInformation {
     pub count: usize,
 }
 
+// Contains opcodes, constants and their associated source code lines
 pub struct Chunk {
     pub code: Vec<u8>,
     pub constants: Vec<Value>,
@@ -63,6 +68,8 @@ impl Chunk {
         self.lines.last_mut().unwrap().count += 1;
     }
 
+    // Add the ConstantIndex as two bytes in a row to the code.
+    // Does not add anything to the constant table
     pub fn append_constant_index(&mut self, val: ConstantIndex, line: i32) {
         let [high, low] = val.to_be_bytes();
 
@@ -91,6 +98,7 @@ impl Chunk {
             .map(|line_information| line_information.line)
     }
 
+    // Add a constant to the constant table without adding it's index to the code
     pub fn add_constant(&mut self, val: Value) -> Result<ConstantIndex, &'static str> {
         if self.constants.len() >= ConstantIndex::MAX as usize {
             Err("Too many constants in one chunk")

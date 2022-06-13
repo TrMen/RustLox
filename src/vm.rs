@@ -1,6 +1,9 @@
+use std::collections::HashMap;
+
 use crate::{
     assembler,
     chunk::{Chunk, CodeIndex, OpCode},
+    indexable_string_set::IndexableStringSet,
     object::ObjectList,
     value::{print_vec_val, Value},
 };
@@ -15,15 +18,19 @@ pub struct VM {
     ip: CodeIndex, // instruction pointer points at the instruction about to be executed at all times
     stack: Vec<Value>,
     pub objects: ObjectList,
+    pub strings: IndexableStringSet,
+    globals: HashMap<String, Value>,
 }
 
 impl VM {
-    pub fn new(objects: ObjectList) -> VM {
+    pub fn new(objects: ObjectList, strings: IndexableStringSet) -> VM {
         VM {
             chunk: Chunk::new(),
             ip: 0,
             stack: Vec::with_capacity(512),
             objects,
+            strings,
+            globals: HashMap::new(),
         }
     }
 
@@ -35,9 +42,10 @@ impl VM {
             let instruction = self.chunk.instruction_at(self.ip);
 
             if instruction.is_none() {
-                println!("\nObjectList at end: {:?}", self.objects);
+                println!("\nObjectList: {:?}", self.objects);
                 print_vec_val(&self.stack);
                 print_vec_val(&self.chunk.constants);
+                println!("\nGlobals: {:?}", self.globals);
                 return Ok(()); // Done interpreting
             }
 
@@ -46,7 +54,7 @@ impl VM {
                 print!("          ");
 
                 for value in &self.stack {
-                    print!("[ {} ]", value.stringify(&self.objects));
+                    print!("[ {} ]", value.stringify(&self.strings));
                 }
 
                 println!();
@@ -66,14 +74,13 @@ impl VM {
         match instruction {
             OpCode::Return => {
                 if let Some(stack_top) = self.stack.pop() {
-                    print!("{}", stack_top.stringify(&self.objects));
+                    print!("{}", stack_top.stringify(&self.strings));
                 }
             }
             OpCode::Constant => {
                 // Note: ip already incremented, so ip is start of constant index
-                let constant = self.chunk.constant_at_code_index(self.ip);
-                self.stack.push(constant.clone());
-                self.ip += 2; // Skip low and high of constant index
+                let constant = self.read_constant();
+                self.stack.push(constant);
             }
             OpCode::Negate => self.unary_op(std::ops::Neg::neg)?,
             OpCode::Not => self.unary_op(std::ops::Not::not)?,
@@ -84,7 +91,7 @@ impl VM {
                 let rhs = self.pop(); // This order is intended
                 let lhs = self.pop(); // If lhs is evaluated first, it will be below rhs on a stack
 
-                let val = match Value::add(lhs, rhs, &mut self.objects) {
+                let val = match Value::add(lhs, rhs, &mut self.strings, &mut self.objects) {
                     Err(msg) => {
                         return Err(RuntimeError {
                             msg: String::from(msg),
@@ -100,9 +107,7 @@ impl VM {
                 };
 
                 self.stack.push(val);
-
-                Ok(())
-            }?,
+            }
             OpCode::Subtract => self.binary_op(std::ops::Sub::sub)?,
             OpCode::Multiply => self.binary_op(std::ops::Mul::mul)?,
             OpCode::Divide => self.binary_op(std::ops::Div::div)?,
@@ -115,16 +120,37 @@ impl VM {
                 let rhs = self.pop(); // This order is intended
                 let lhs = self.pop(); // If lhs is evaluated first, it will be below rhs on a stack
 
-                /*let compared = if lhs.is_string() && rhs.is_string() { TODO: Add string-deduplication
-                    self.compare_strings(&lhs, &rhs)
-                }
-                else {
-                    Value::Bool(lhs == rhs)
-                }*/
-
                 let compared = Value::Bool(lhs == rhs);
 
                 self.stack.push(compared);
+            }
+            OpCode::Print => {
+                let val = self.pop();
+
+                println!("{}", val.stringify(&self.strings));
+            }
+            OpCode::Pop => {
+                self.stack.pop();
+            }
+            OpCode::DefineGlobal => {
+                let identifier = self.read_constant().as_string(&self.strings);
+
+                self.globals.insert(identifier, self.peek().clone());
+
+                // Don't pop the value till after insertion into globals,
+                // to prevent GC cleanup while we're inserting
+                self.pop();
+            }
+            OpCode::GetGlobal => {
+                let identifier = self.read_constant().as_string(&self.strings);
+
+                if let Some(val) = self.globals.get(&identifier) {
+                    self.stack.push(val.clone());
+                } else {
+                    return Err(RuntimeError {
+                        msg: format!("Undefined variable {identifier}"),
+                    });
+                }
             }
         }
 
@@ -153,7 +179,7 @@ impl VM {
         Ok(())
     }
 
-    pub fn runtime_error(&mut self, msg: &str) {
+    fn runtime_error(&mut self, msg: &str) {
         println!(
             "{}\n [line {}] in script",
             msg,
@@ -195,6 +221,17 @@ impl VM {
     pub fn pop(&mut self) -> Value {
         self.stack.pop().expect("Stack empty")
     }
+
+    pub fn peek(&self) -> &Value {
+        self.stack.last().unwrap()
+    }
+
+    fn read_constant(&mut self) -> Value {
+        let constant = self.chunk.constant_at_code_index(self.ip);
+        self.ip += 2; // Skip low and high of constant index
+
+        constant.clone() // TODO: No clone needed
+    }
 }
 
 #[cfg(test)]
@@ -205,9 +242,9 @@ mod tests {
 
     #[test]
     fn constant() {
-        let mut vm = VM::new(ObjectList::new());
+        let mut vm = VM::new(ObjectList::new(), IndexableStringSet::new());
 
-        let (chunk, _) = Compiler::compile("1").unwrap();
+        let (chunk, _, _) = Compiler::compile("1").unwrap();
 
         assert_eq!(vm.interpret(chunk), Ok(()));
     }
