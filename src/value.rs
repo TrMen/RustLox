@@ -8,7 +8,7 @@ use crate::{
     object::{Object, ObjectList},
 };
 
-#[derive(Debug, Clone)] // TODO: Remove clone for possible string-deduplication
+#[derive(Debug, Clone)]
 pub enum Value {
     Double(f32),
     Bool(bool),
@@ -56,7 +56,7 @@ impl Value {
 
     pub fn is_truthy(&self) -> bool {
         match self {
-            Value::Bool(val) => !val,
+            Value::Bool(val) => *val,
             Value::Nil => false,
             _ => true,
         }

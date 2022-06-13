@@ -1,0 +1,23 @@
+if (true) {
+    print "shouldprint1";
+}
+
+print "alwaysprints1";
+
+
+if (false) {
+    print "shouldnotprint1";
+}
+else {
+    print "Shouldprint2";
+}
+
+if (true) {
+    print "shouldprint3";
+}
+else {
+    print "shouldnotprint2";
+}
+
+print "shouldnotprint3" and "shouldprint4";
+print "shouldprint5" or "shouldnotprint5";

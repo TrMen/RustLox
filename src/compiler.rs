@@ -1,7 +1,10 @@
-use std::{collections::HashSet, hash::Hash};
+use std::{collections::HashSet, convert::TryInto, hash::Hash};
 
 use crate::{
-    chunk::{Chunk, ConstantIndex, OpCodeWithArg, OpCodeWithoutArg},
+    chunk::{
+        Chunk, CodeIndex, ConstantIndex, JumpOffset, LocalIndex, OpCodeWithArg, OpCodeWithoutArg,
+        TwoByteArg,
+    },
     indexable_string_set::IndexableStringSet,
     object::{Object, ObjectList},
     parser::Parser,
@@ -77,7 +80,7 @@ fn init_rules<'a>() -> [ParseRule<'a>; TokenKind::VARIANT_COUNT] {
         rule(Some(Compiler::variable), None, Prec::new(Precedence::None)), // Identifier
         rule(Some(Compiler::string), None, Prec::new(Precedence::None)),   // String
         rule(Some(Compiler::number), None, Prec::new(Precedence::None)),   // Number
-        rule(None, None, Prec::new(Precedence::None)),                     //and
+        rule(None, Some(Compiler::and), Prec::new(Precedence::And)),       // and
         rule(None, None, Prec::new(Precedence::None)),                     //class
         rule(None, None, Prec::new(Precedence::None)),                     //else
         rule(Some(Compiler::literal), None, Prec::new(Precedence::None)),  // false
@@ -85,7 +88,7 @@ fn init_rules<'a>() -> [ParseRule<'a>; TokenKind::VARIANT_COUNT] {
         rule(None, None, Prec::new(Precedence::None)),                     //fun
         rule(None, None, Prec::new(Precedence::None)),                     // if
         rule(Some(Compiler::literal), None, Prec::new(Precedence::None)),  // nil
-        rule(None, None, Prec::new(Precedence::None)),                     // or
+        rule(None, Some(Compiler::or), Prec::new(Precedence::Or)),         // or
         rule(None, None, Prec::new(Precedence::None)),                     // print
         rule(None, None, Prec::new(Precedence::None)),                     //return
         rule(None, None, Prec::new(Precedence::None)),                     // super
@@ -150,10 +153,6 @@ struct ScopeInformation<'src> {
     locals: Vec<Local<'src>>,
     scope_depth: usize,
 }
-
-// This is pushed as args on the stack. Two bytes like ConstantIndex.
-// At runtime, the value of the local variable is at that many locals away on the stack.
-type LocalIndex = u16;
 
 impl<'src> ScopeInformation<'src> {
     const MAX_DEPTH: usize = usize::MAX / 2;
@@ -339,12 +338,12 @@ impl<'src> Compiler<'src> {
         self.emit_op(second);
     }
 
-    fn emit_op_with_arg(&mut self, op: OpCodeWithArg, arg: ConstantIndex) {
+    fn emit_op_with_arg(&mut self, op: OpCodeWithArg, arg: TwoByteArg) {
         let line = self.parser.previous.line;
         self.chunk.append_op(op.into(), line);
 
         let line = self.parser.previous.line;
-        self.chunk.append_constant_index(arg, line);
+        self.chunk.append_arg(arg, line);
     }
 
     fn emit_constant(&mut self, value: Value) {
@@ -359,12 +358,27 @@ impl<'src> Compiler<'src> {
         self.emit_op_with_arg(OpCodeWithArg::Constant, constant_index);
     }
 
+    fn emit_loop(&mut self, loop_start: CodeIndex) {
+        // emit_jmp_with_placeholder and backpatch_jmp combined, because the offset is swapped
+        // and we don't need to backpatch.
+
+        // +3 because op itself wasn't emitted yet, unlike in backpatch_jmp
+        let distance_backwards = self.chunk.code_bytes_len() - loop_start + 3;
+
+        if let Ok(distance) = distance_backwards.try_into() {
+            self.emit_op_with_arg(OpCodeWithArg::JumpBackward, distance);
+        } else {
+            self.parser
+                .report_error_at_previous("Too much code to jump over.");
+        }
+    }
+
     // Returns the index in the constant table that holds the variable name
     fn parse_variable(
         &mut self,
         err_msg: &str,
         modifiers: VariableModifiers,
-    ) -> (&'src str, ConstantIndex) {
+    ) -> (&'src str, TwoByteArg) {
         self.parser.consume(TokenKind::Identifier, err_msg);
 
         if self.scope_information.is_global() {
@@ -373,11 +387,11 @@ impl<'src> Compiler<'src> {
                     "Global variables must be immutable. Try 'let {} = ...;'",
                     self.parser.previous.lexeme
                 ));
-                (self.parser.previous.lexeme, ConstantIndex::MAX)
+                (self.parser.previous.lexeme, TwoByteArg::MAX)
             } else {
                 (
                     self.parser.previous.lexeme,
-                    self.add_identifier_constant(self.parser.previous.lexeme),
+                    self.add_identifier_constant(self.parser.previous.lexeme), // ConstantIndex
                 )
             }
         } else {
@@ -386,7 +400,7 @@ impl<'src> Compiler<'src> {
             self.declare_local_variable(modifiers);
             (
                 "Local identifiers aren't read at runtime",
-                ConstantIndex::MAX,
+                TwoByteArg::MAX, // LocalIndex
             )
         }
     }
@@ -434,9 +448,28 @@ impl<'src> Compiler<'src> {
         }
     }
 
+    #[must_use]
+    fn emit_jmp_with_placeholder(&mut self, op: OpCodeWithArg) -> CodeIndex {
+        self.emit_op_with_arg(op, JumpOffset::MAX);
+
+        self.chunk.code_bytes_len() - 2
+    }
+
+    fn backpatch_jmp(&mut self, jmp_instr_index: CodeIndex) {
+        let jump_distance = self.chunk.code_bytes_len() - (jmp_instr_index + 2);
+
+        if let Ok(distance) = jump_distance.try_into() {
+            self.chunk
+                .change_arg_at_code_index(jmp_instr_index as usize, distance);
+        } else {
+            self.parser
+                .report_error_at_previous("Too much code to jump over.");
+        }
+    }
+
     // --------------------------------Parse Helper Methods--------------------------------
 
-    fn parse_precedence(&mut self, prec: Prec) {
+    fn parse_expr_with_precedence(&mut self, prec: Prec) {
         // At this point, our previus token is some kind of operator (in a general sense).
         // E.g. '-', '+', '('. For this, there could be defined prefix and/or infix functions
 
@@ -561,6 +594,10 @@ impl<'src> Compiler<'src> {
     fn statement(&mut self) {
         if self.parser.match_advance(TokenKind::Print) {
             self.print_statement();
+        } else if self.parser.match_advance(TokenKind::If) {
+            self.if_statement();
+        } else if self.parser.match_advance(TokenKind::While) {
+            self.while_statement();
         } else if self.parser.match_advance(TokenKind::LeftBrace) {
             // TODO: Can't those scope begin/ends just go in the block()?
             self.begin_scope();
@@ -569,6 +606,53 @@ impl<'src> Compiler<'src> {
         } else {
             self.expression_statement();
         }
+    }
+
+    fn while_statement(&mut self) {
+        let loop_start = self.chunk.code_bytes_len();
+
+        self.parser
+            .consume(TokenKind::LeftParen, "Expect '(' after 'while'.");
+        self.expression();
+        self.parser
+            .consume(TokenKind::RightParen, "Expect ')' after while predicate.");
+
+        let exit_jmp = self.emit_jmp_with_placeholder(OpCodeWithArg::JumpIfFalse);
+
+        self.statement();
+        self.emit_loop(loop_start);
+
+        self.backpatch_jmp(exit_jmp);
+
+        self.emit_op(OpCodeWithoutArg::Pop);
+    }
+
+    fn if_statement(&mut self) {
+        self.parser
+            .consume(TokenKind::LeftParen, "Expect '(' after 'if'.");
+        // At runtime, leaves condition value on top of stack, which is then used by emit_jmp.
+        self.expression();
+        self.parser.consume(
+            TokenKind::RightParen,
+            "Expect ')' after predicate of 'if' statement.",
+        );
+
+        let then_jump = self.emit_jmp_with_placeholder(OpCodeWithArg::JumpIfFalse);
+        // The vm doesn't pop the condition value itself,
+        // so we insert a pop in all paths
+        self.emit_op(OpCodeWithoutArg::Pop);
+
+        self.statement();
+
+        let end_of_then_jump = self.emit_jmp_with_placeholder(OpCodeWithArg::JumpForward);
+
+        self.backpatch_jmp(then_jump); // To not fallthrough, unconditionally jump after then
+
+        self.emit_op(OpCodeWithoutArg::Pop);
+        if self.parser.match_advance(TokenKind::Else) {
+            self.statement();
+        }
+        self.backpatch_jmp(end_of_then_jump);
     }
 
     fn block(&mut self) {
@@ -595,7 +679,7 @@ impl<'src> Compiler<'src> {
     }
 
     fn expression(&mut self) {
-        self.parse_precedence(Prec::new(Precedence::Assign));
+        self.parse_expr_with_precedence(Prec::new(Precedence::Assign));
     }
 
     fn literal(&mut self, _: &ExtraExprParseInfo) {
@@ -690,7 +774,7 @@ impl<'src> Compiler<'src> {
         let operator_kind = self.parser.previous.kind; // Must be grabbed before operand is parsed
 
         // Compile the operand
-        self.parse_precedence(Prec::new(Precedence::Unary));
+        self.parse_expr_with_precedence(Prec::new(Precedence::Unary));
 
         // Emit the operator instruction (remember: stack-based -> operator after operands)
         match operator_kind {
@@ -712,7 +796,7 @@ impl<'src> Compiler<'src> {
 
         // Parse rhs operand.
         // One higher precedence level, because we want left-associativity: 1+2+3 == (1+2)+3
-        self.parse_precedence(rule.prec.next());
+        self.parse_expr_with_precedence(rule.prec.next());
 
         // After operands, emit bytecode for operator
         match operator_kind {
@@ -728,6 +812,44 @@ impl<'src> Compiler<'src> {
             TokenKind::BangEqual => self.emit_ops(OpCodeWithoutArg::Equal, OpCodeWithoutArg::Not),
             invalid => panic!("Invalid operator type in binary expression: {}", invalid),
         }
+    }
+
+    fn and(&mut self, _: &ExtraExprParseInfo) {
+        // TODO: Annotate other confusing functions with what they emit.
+        // 'and' in lox is a control flow expression in that it short-circuits.
+        // Code after compilation:
+
+        // <lhs expr>
+        // OP_JMP_IF_FALSE
+        // OP_POP
+        // <rhs expr>
+
+        // Lhs has already been compiled, so at runtime condition is top of stack.
+        // If false, rhs is never evaluated, just jumped past
+        let end_jmp = self.emit_jmp_with_placeholder(OpCodeWithArg::JumpIfFalse);
+
+        // If lhs is truthy, pop lhs so rhs can become the top of stack
+        // Else lhs sticks around on stack, and the rhs code is skipped -> lhs becomes value of 'and' expr
+        self.emit_op(OpCodeWithoutArg::Pop);
+
+        // Rhs
+        self.parse_expr_with_precedence(Prec::new(Precedence::And));
+
+        self.backpatch_jmp(end_jmp);
+    }
+
+    fn or(&mut self, _: &ExtraExprParseInfo) {
+        // 'or' in lox is a control flow expression in that it short-circuits (like 'and').
+        // If lhs is truthy, skip over rhs.
+
+        let end_jmp = self.emit_jmp_with_placeholder(OpCodeWithArg::JumpIfTrue);
+
+        self.emit_op(OpCodeWithoutArg::Pop);
+
+        // Rhs
+        self.parse_expr_with_precedence(Prec::new(Precedence::Or));
+
+        self.backpatch_jmp(end_jmp);
     }
 }
 
