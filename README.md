@@ -1,6 +1,8 @@
 # RustLox
 An interpreter based on a simple Bytecode VM for the language Lox, specified in the book "Crafting Interpreters".
 
+Code samples can be found in the `samples` folder.
+
 This is an implementation of the second half of the above-mentioned book. Compared to my other repo [CppLox](https://github.com/TrMen/CppLox), this is still in its early stages.
 
 The basic language works, including expressions, local and global variable usage and assignment. 
