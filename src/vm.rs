@@ -169,7 +169,19 @@ impl VM {
                 }
             }
             OpCode::SetGlobal => {
-                todo!()
+                let identifier = self.read_constant().as_str(&self.strings);
+
+                // Note: Don't pop the value off the stack in case the assignment is
+                // nested in a bigger expression.
+                let assigned_val = self.peek().clone();
+
+                if let Some(val) = self.globals.get_mut(identifier) {
+                    *val = assigned_val;
+                } else {
+                    return Err(RuntimeError {
+                        msg: format!("Undefined variable {identifier}"),
+                    });
+                }
             }
         }
 
