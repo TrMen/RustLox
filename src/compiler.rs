@@ -91,6 +91,10 @@ fn init_rules<'a>() -> [ParseRule<'a>; TokenKind::VARIANT_COUNT] {
     ]
 }
 
+// TODO: These should really be propagated around all the methods.
+// Right now, I just report the msg in the parser, then continue (after sync).
+// And make up a nondescript error msg at the end for the CompiletimeError that's
+// returned by end_compilation.
 #[derive(Debug, PartialEq)]
 pub struct CompiletimeError {
     pub msg: String,
@@ -124,6 +128,112 @@ impl<'src> Hash for UsedGlobal<'src> {
     }
 }
 
+// TODO: I don't like that I store the whole token by value so much. But it's prolly fine
+struct Local<'src> {
+    token: Token<'src>,
+    depth: usize,
+}
+
+struct ScopeInformation<'src> {
+    // Locals are appended to the array, so the locals with deepest scope
+    // are always at the end
+    locals: Vec<Local<'src>>,
+    scope_depth: usize,
+}
+
+// This is pushed as args on the stack. Two bytes like ConstantIndex.
+// At runtime, the value of the local variable is at that many locals away on the stack.
+type LocalIndex = u16;
+
+impl<'src> ScopeInformation<'src> {
+    const MAX_DEPTH: usize = usize::MAX / 2;
+    const UNINITIALIZED_DEPTH: usize = Self::MAX_DEPTH + 1;
+    const MAX_LOCAL_COUNT: usize = LocalIndex::MAX as usize + 1;
+
+    fn add_local(&mut self, token: Token<'src>) -> Result<(), CompiletimeError> {
+        // Note: UNDEFINED_DEPTH must be greater than MAX_DEPTH
+
+        if self.locals.len() >= Self::MAX_LOCAL_COUNT {
+            return Err(CompiletimeError {
+                msg: format!(
+                    "Too many local variables defined in scope. Max {}.",
+                    Self::MAX_LOCAL_COUNT
+                ),
+            });
+        }
+
+        if self
+            .locals_at_current_depth()
+            .any(|local| local.token.lexeme == token.lexeme)
+        {
+            return Err(CompiletimeError {
+                msg: format!("Redefinition of local variable '{}'", token.lexeme),
+            });
+        }
+
+        self.locals.push(Local {
+            token,
+            // To prevent self-referential definition, split definition into two phases
+            // and initialize depth at the end of the defintion
+            depth: Self::UNINITIALIZED_DEPTH,
+        });
+
+        Ok(())
+    }
+
+    fn pop_scope(&mut self) -> usize {
+        self.scope_depth -= 1;
+
+        let popped_locals = self
+            .locals
+            .iter()
+            .rev()
+            .take_while(|local| local.depth > self.scope_depth)
+            .count();
+
+        // TODO: Indices correct?
+        self.locals.truncate(self.locals.len() - popped_locals);
+
+        popped_locals
+    }
+
+    fn resolve_local(
+        &self,
+        identifier: &'src str,
+        parser: &mut Parser<'src>, // TODO: This shouldn't be needed, just properly propagate errors
+    ) -> Option<LocalIndex> {
+        self.locals
+            .iter()
+            .rev()
+            .position(|local| {
+                let is_equal = local.token.lexeme == identifier;
+                if is_equal && local.depth == Self::UNINITIALIZED_DEPTH {
+                    parser.report_error_at_previous(
+                        "Can't read local variable in it's own initializer.",
+                    );
+                }
+                is_equal
+            })
+            .map(|pos| pos as LocalIndex) // Save because max locals limit is enforced in add_local
+    }
+
+    fn locals_at_current_depth(&self) -> impl Iterator<Item = &Local<'src>> {
+        self.locals
+            .iter()
+            .rev()
+            // Take all in undefined or deeper scope
+            .take_while(move |local| local.depth >= self.scope_depth) // >= to capture UNDEFINED_DEPTH
+    }
+
+    fn is_global(&self) -> bool {
+        self.scope_depth == 0
+    }
+
+    fn mark_last_local_initialized(&mut self) {
+        self.locals.last_mut().unwrap().depth = self.scope_depth;
+    }
+}
+
 pub struct Compiler<'src> {
     rules: [ParseRule<'src>; TokenKind::VARIANT_COUNT],
     parser: Parser<'src>,
@@ -132,6 +242,7 @@ pub struct Compiler<'src> {
     interned_strings: IndexableStringSet,
     accessed_globals: HashSet<UsedGlobal<'src>>,
     mode: InterpretationMode,
+    scope_information: ScopeInformation<'src>,
 }
 
 impl<'src> Compiler<'src> {
@@ -147,6 +258,10 @@ impl<'src> Compiler<'src> {
             interned_strings: IndexableStringSet::new(),
             accessed_globals: HashSet::new(),
             mode,
+            scope_information: ScopeInformation {
+                locals: Vec::new(),
+                scope_depth: 0,
+            },
         };
 
         compiler.parser.advance();
@@ -171,7 +286,7 @@ impl<'src> Compiler<'src> {
             }) {
                 self.parser.report_error_at(
                     token,
-                    &format!("Access of undefined global variable '{}'", token.lexeme,),
+                    &format!("Access of undefined variable '{}'", token.lexeme,),
                 );
             }
         }
@@ -185,6 +300,11 @@ impl<'src> Compiler<'src> {
         }
     }
 
+    // --------------------------------Bytecode Emission methods--------------------------------
+
+    // TODO: More cleanly separate the methods according to what they do. It's all very muddy.
+    // Parse, codegen, helpers
+
     fn emit_op(&mut self, op: OpCodeWithoutArg) {
         let line = self.parser.previous.line;
         self.chunk.append_op(op.into(), line);
@@ -196,11 +316,9 @@ impl<'src> Compiler<'src> {
     }
 
     fn emit_op_with_arg(&mut self, op: OpCodeWithArg, arg: ConstantIndex) {
-        // Op
         let line = self.parser.previous.line;
         self.chunk.append_op(op.into(), line);
 
-        // Constant index arg
         let line = self.parser.previous.line;
         self.chunk.append_constant_index(arg, line);
     }
@@ -216,6 +334,53 @@ impl<'src> Compiler<'src> {
 
         self.emit_op_with_arg(OpCodeWithArg::Constant, constant_index);
     }
+
+    // Returns the index in the constant table that holds the variable name
+    fn parse_variable(&mut self, err_msg: &str) -> (&'src str, ConstantIndex) {
+        self.parser.consume(TokenKind::Identifier, err_msg);
+
+        if self.scope_information.is_global() {
+            (
+                self.parser.previous.lexeme,
+                self.add_identifier_constant(self.parser.previous.lexeme),
+            )
+        } else {
+            // TODO: This is just declare_variable in the book and always called (where it just returns for globals)
+            // I might get bitten by the differences.
+            self.declare_local_variable();
+            (
+                "Local identifiers aren't read at runtime",
+                ConstantIndex::MAX,
+            )
+        }
+    }
+
+    fn declare_local_variable(&mut self) {
+        let identifier_token = &self.parser.previous;
+
+        if let Err(e) = self.scope_information.add_local(identifier_token.clone()) {
+            // TODO: Is this enough error handling? This likely has false-positive follow up errors if
+            // we check that locals are actually defined at comptime. But this is unlikely to be a big deal.
+            self.parser.report_error_at_previous(&e.msg);
+        }
+    }
+
+    fn define_variable(&mut self, identifier: &'src str, global: ConstantIndex) {
+        if !self.scope_information.is_global() {
+            self.scope_information.mark_last_local_initialized();
+
+            // There is no code to define local variables at runtime, the VM already
+            // executed the initializer and the result is a temporary at the top of stack stack.
+            // So the temp simply becomes the local variable, that's it. Scoping is implicit.
+            return;
+        }
+
+        self.accessed_globals
+            .insert(UsedGlobal::Defined(identifier));
+        self.emit_op_with_arg(OpCodeWithArg::DefineGlobal, global);
+    }
+
+    // --------------------------------Parse Helper Methods--------------------------------
 
     fn parse_precedence(&mut self, prec: Prec) {
         // At this point, our previus token is some kind of operator (in a general sense).
@@ -284,23 +449,24 @@ impl<'src> Compiler<'src> {
         }
     }
 
-    fn define_variable(&mut self, identifier: &'src str, global: ConstantIndex) {
-        self.accessed_globals
-            .insert(UsedGlobal::Defined(identifier));
-        self.emit_op_with_arg(OpCodeWithArg::DefineGlobal, global);
+    fn begin_scope(&mut self) {
+        if self.scope_information.scope_depth >= ScopeInformation::MAX_DEPTH {
+            self.parser
+                .report_error_at_previous("Too many nested scopes.");
+            return;
+        }
+
+        self.scope_information.scope_depth += 1;
     }
 
-    // --------------------------------Parsing methods--------------------------------
-
-    // Returns the index in the constant table that holds the variable name
-    fn parse_variable(&mut self, err_msg: &str) -> (&'src str, ConstantIndex) {
-        self.parser.consume(TokenKind::Identifier, err_msg);
-
-        (
-            self.parser.previous.lexeme,
-            self.add_identifier_constant(self.parser.previous.lexeme),
-        )
+    fn end_scope(&mut self) {
+        for _ in 0..self.scope_information.pop_scope() {
+            // Pop value from the stack at runtime
+            self.emit_op(OpCodeWithoutArg::Pop);
+        }
     }
+
+    // --------------------------------Production methods--------------------------------
 
     fn declaration(&mut self) {
         if self.parser.match_advance(TokenKind::Var) {
@@ -334,9 +500,23 @@ impl<'src> Compiler<'src> {
     fn statement(&mut self) {
         if self.parser.match_advance(TokenKind::Print) {
             self.print_statement();
+        } else if self.parser.match_advance(TokenKind::LeftBrace) {
+            // TODO: Can't those scope begin/ends just go in the block()?
+            self.begin_scope();
+            self.block();
+            self.end_scope();
         } else {
             self.expression_statement();
         }
+    }
+
+    fn block(&mut self) {
+        while !self.parser.check(TokenKind::RightBrace) && !self.parser.check(TokenKind::Eof) {
+            self.declaration();
+        }
+
+        self.parser
+            .consume(TokenKind::RightBrace, "Expect '}' after block.");
     }
 
     fn expression_statement(&mut self) {
@@ -390,20 +570,37 @@ impl<'src> Compiler<'src> {
         self.named_variable(self.parser.previous.lexeme, can_assign);
     }
 
-    fn named_variable(&mut self, name: &'src str, can_assign: bool) {
+    fn named_variable(&mut self, identifier: &'src str, can_assign: bool) {
         // TODO: A duplicating constant is added every time a variable is accessed.
         // This can be avoided.
-        let constant_index = self.add_identifier_constant(name);
 
-        // TODO: Is current correct?
-        self.accessed_globals
-            .get_or_insert(UsedGlobal::Accessed(self.parser.previous.clone()));
+        let (get_op, set_op, arg) = match self
+            .scope_information
+            .resolve_local(identifier, &mut self.parser)
+        {
+            Some(local_index) => (
+                OpCodeWithArg::GetLocal,
+                OpCodeWithArg::SetLocal,
+                local_index,
+            ),
+            None => {
+                let global_constant_index = self.add_identifier_constant(identifier);
+
+                self.accessed_globals
+                    .get_or_insert(UsedGlobal::Accessed(self.parser.previous.clone()));
+                (
+                    OpCodeWithArg::GetGlobal,
+                    OpCodeWithArg::SetGlobal,
+                    global_constant_index,
+                )
+            }
+        };
 
         if can_assign && self.parser.match_advance(TokenKind::Equal) {
             self.expression();
-            self.emit_op_with_arg(OpCodeWithArg::SetGlobal, constant_index);
+            self.emit_op_with_arg(set_op, arg);
         } else {
-            self.emit_op_with_arg(OpCodeWithArg::GetGlobal, constant_index);
+            self.emit_op_with_arg(get_op, arg);
         }
     }
 

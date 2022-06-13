@@ -14,6 +14,8 @@ pub enum OpCode {
     GetGlobal,
     DefineGlobal,
     SetGlobal,
+    GetLocal,
+    SetLocal,
     Pop,
     Print,
     Return,
@@ -45,6 +47,8 @@ impl From<OpCodeWithArg> for OpCode {
             OpCodeWithArg::GetGlobal => Self::GetGlobal,
             OpCodeWithArg::SetGlobal => Self::SetGlobal,
             OpCodeWithArg::Constant => Self::Constant,
+            OpCodeWithArg::SetLocal => Self::SetLocal,
+            OpCodeWithArg::GetLocal => Self::GetLocal,
         }
     }
 }
@@ -71,11 +75,14 @@ impl From<OpCodeWithoutArg> for OpCode {
     }
 }
 
+// The argument is always 2 bytes
 #[repr(u8)]
 pub enum OpCodeWithArg {
     GetGlobal,
     DefineGlobal,
     SetGlobal,
+    SetLocal,
+    GetLocal, // Note: No DefineLocal, since that's all done at comptime
     Constant,
 }
 
@@ -171,13 +178,18 @@ impl Chunk {
         }
     }
 
-    pub fn constant_at_code_index(&self, code_index: CodeIndex) -> &Value {
+    // TODO: "arg" always refers to two bytes. If that's ever not true, make these names different
+    pub fn arg_at_code_index(&self, code_index: CodeIndex) -> u16 {
         let high = self.code[code_index];
         let low = self.code[(code_index + 1)];
 
-        let combined_index = u16::from_be_bytes([high, low]);
+        u16::from_be_bytes([high, low])
+    }
 
-        &self.constants[combined_index as usize]
+    pub fn constant_at_code_index(&self, code_index: CodeIndex) -> &Value {
+        let constant_index = self.arg_at_code_index(code_index);
+
+        &self.constants[constant_index as usize]
     }
 
     pub fn instruction_at(&self, code_index: CodeIndex) -> Option<OpCode> {
