@@ -90,10 +90,10 @@ impl Value {
 
                 Ok(Value::Obj(obj_string))
             } else {
-                Err("Operands must be numbers or strings")
+                Err("Operands of addition must be numbers or strings")
             }
         } else {
-            Err("Operands must be numbers or strings")
+            Err("Operands of addition must be numbers or strings")
         }
     }
 
@@ -101,7 +101,7 @@ impl Value {
         if let (Value::Double(lhs), Value::Double(rhs)) = (self, other) {
             Ok(Value::Bool(op(lhs, rhs)))
         } else {
-            Err("Operands must be numbers")
+            Err("Operands of comparisons must be numbers")
         }
     }
 }
@@ -133,7 +133,7 @@ impl Sub for Value {
         if let (Value::Double(lhs), Value::Double(rhs)) = (self, rhs) {
             Ok(Value::Double(lhs - rhs))
         } else {
-            Err("Operands must be numbers")
+            Err("Operands of subtraction must be numbers")
         }
     }
 }
@@ -145,7 +145,7 @@ impl Mul for Value {
         if let (Value::Double(lhs), Value::Double(rhs)) = (self, rhs) {
             Ok(Value::Double(lhs * rhs))
         } else {
-            Err("Operands must be numbers")
+            Err("Operands of multiplication must be numbers")
         }
     }
 }
@@ -157,7 +157,7 @@ impl Div for Value {
         if let (Value::Double(lhs), Value::Double(rhs)) = (self, rhs) {
             Ok(Value::Double(lhs / rhs))
         } else {
-            Err("Operands must be numbers")
+            Err("Operands of division must be numbers")
         }
     }
 }

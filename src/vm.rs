@@ -7,14 +7,8 @@ use crate::{
     indexable_string_set::IndexableStringSet,
     object::ObjectList,
     value::{print_vec_val, Value},
+    CliArgs,
 };
-
-#[derive(Clone, PartialEq)]
-pub enum InterpretationMode {
-    Repl,
-    File(String),
-    // TODO: Can add things like strict-file, ahead-of-time-compile, etc.
-}
 
 #[derive(Debug, PartialEq)]
 pub struct RuntimeError {
@@ -34,7 +28,7 @@ pub struct VM {
     pub objects: ObjectList,
     pub interned_strings: IndexableStringSet,
     globals: HashMap<String, Value>,
-    mode: InterpretationMode,
+    args: CliArgs,
 }
 
 impl VM {
@@ -42,7 +36,7 @@ impl VM {
     pub fn new_with_precompiled(
         objects: ObjectList,
         interned_strings: IndexableStringSet,
-        mode: InterpretationMode,
+        args: CliArgs,
     ) -> VM {
         VM {
             chunk: Chunk::new(),
@@ -51,11 +45,11 @@ impl VM {
             objects,
             interned_strings,
             globals: HashMap::new(),
-            mode,
+            args,
         }
     }
 
-    pub fn new_without_input(mode: InterpretationMode) -> VM {
+    pub fn new_without_input(args: CliArgs) -> VM {
         VM {
             chunk: Chunk::new(),
             ip: 0,
@@ -63,7 +57,7 @@ impl VM {
             objects: ObjectList::new(),
             interned_strings: IndexableStringSet::new(),
             globals: HashMap::new(),
-            mode,
+            args,
         }
     }
 
@@ -71,7 +65,7 @@ impl VM {
         &mut self,
         source: &str,
     ) -> Result<(&Chunk, &ObjectList, &IndexableStringSet), InterpretationError> {
-        let (chunk, object_list, interned_strings) = Compiler::compile(source, self.mode.clone())
+        let (chunk, object_list, interned_strings) = Compiler::compile(source, self.args.clone())
             .map_err(InterpretationError::Compiletime)?;
 
         self.objects.merge(object_list);
@@ -86,9 +80,11 @@ impl VM {
         &mut self,
         chunk: Chunk,
     ) -> Result<(&Chunk, &ObjectList, &IndexableStringSet), RuntimeError> {
-        if cfg!(debug_assertions) {
+        if self.args.print_code {
             assembler::disassemble(&chunk, "code");
+        }
 
+        if cfg!(debug_assertions) {
             println!("\nStart of interpretation\n");
             println!("{:04} {:4} {:-16} constant", "ip", "line", "Instruction");
         }
@@ -126,10 +122,7 @@ impl VM {
             self.ip += 1; // ip must always point to the next instruction while executing the last
 
             if let Err(mut err) = self.execute_instruction(instruction.unwrap()) {
-                let source_name = match &self.mode {
-                    InterpretationMode::Repl => String::from("Repl"),
-                    InterpretationMode::File(filename) => filename.clone(),
-                };
+                let source_name = self.args.file.as_deref().unwrap_or("Repl");
 
                 err.msg = format!(
                     "{}\n [line {}] in {}",
@@ -364,15 +357,16 @@ mod tests {
 
     #[test]
     fn constant() {
-        let mut vm = VM::new_without_input(InterpretationMode::Repl);
+        let mut vm = VM::new_without_input(CliArgs::test(true));
 
         vm.compile_and_interpret("1;").expect("Compilaton failed");
     }
 
     #[test]
     fn undefined_var_is_comptime_error_in_file_mode() {
-        let mut vm = VM::new_without_input(InterpretationMode::File(String::from("Unit Test")));
+        let mut vm = VM::new_without_input(CliArgs::test(true));
 
+        // TODO: This test fails. I messed up the logic for interpretation mode in refactor
         let result = vm.compile_and_interpret("print undef;");
 
         debug_assert_matches!(result, Err(InterpretationError::Compiletime(_)));
@@ -380,7 +374,7 @@ mod tests {
 
     #[test]
     fn undefined_var_is_runtime_error_in_repl_mode() {
-        let mut vm = VM::new_without_input(InterpretationMode::Repl);
+        let mut vm = VM::new_without_input(CliArgs::test(false));
 
         let result = vm.compile_and_interpret("print undef;");
 
