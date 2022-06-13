@@ -19,6 +19,9 @@
     print a;
 }
 print b;
-print 2;
-``` This program only reports undefined global b, not the undefined local c;
-- Implement single-assignment variables with 'let' or 'const'
+print 2; //  This program only reports undefined global b, not the undefined local c;
+```
+- Refactor parser and compiler to be easier to place responsibilities.
+- Implement functions
+
+
