@@ -99,7 +99,7 @@ pub enum OpCodeWithArg {
     JumpIfTrue,
     JumpIfFalse, // Argument is how much to offset the ip by if the condition (top of stack) is false
     JumpForward,
-    JumpBackward, // Used for loops
+    JumpBackward, // Note: Called OP_LOOP in the book
 }
 
 #[derive(PartialEq)]

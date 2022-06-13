@@ -358,7 +358,7 @@ impl<'src> Compiler<'src> {
         self.emit_op_with_arg(OpCodeWithArg::Constant, constant_index);
     }
 
-    fn emit_loop(&mut self, loop_start: CodeIndex) {
+    fn emit_jmp_backwards(&mut self, loop_start: CodeIndex) {
         // emit_jmp_with_placeholder and backpatch_jmp combined, because the offset is swapped
         // and we don't need to backpatch.
 
@@ -611,19 +611,21 @@ impl<'src> Compiler<'src> {
     fn while_statement(&mut self) {
         let loop_start = self.chunk.code_bytes_len();
 
+        // condition
         self.parser
             .consume(TokenKind::LeftParen, "Expect '(' after 'while'.");
         self.expression();
         self.parser
             .consume(TokenKind::RightParen, "Expect ')' after while predicate.");
 
+        // body
         let exit_jmp = self.emit_jmp_with_placeholder(OpCodeWithArg::JumpIfFalse);
-
+        self.emit_op(OpCodeWithoutArg::Pop);
         self.statement();
-        self.emit_loop(loop_start);
+        self.emit_jmp_backwards(loop_start);
 
+        // end
         self.backpatch_jmp(exit_jmp);
-
         self.emit_op(OpCodeWithoutArg::Pop);
     }
 
